@@ -6,6 +6,7 @@
 
 import React, { useEffect } from 'react';
 import { useWhiteboardStore } from './store/useWhiteboardStore.js';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { TopBar } from './components/layout/TopBar.js';
 import { LeftToolbar } from './components/layout/LeftToolbar.js';
 import { PropertyBar } from './components/layout/PropertyBar.js';
@@ -16,6 +17,8 @@ import { ShareDialog } from './components/dialogs/ShareDialog.js';
 import { ClearCanvasDialog } from './components/dialogs/ClearCanvasDialog.js';
 
 export const App: React.FC = () => {
+  useKeyboardShortcuts();
+
   const {
     isDarkTheme,
     handleIncomingEnvelope,

@@ -7,6 +7,7 @@ import {
   type RoomStatePayload,
 } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../src/store/useWhiteboardStore.js';
+import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 
 describe('Client UI & Store Suite', () => {
   beforeEach(() => {
@@ -406,6 +407,37 @@ describe('Client UI & Store Suite', () => {
     expect(state.lastAppliedSeq).toBe(20);
     expect(state.chatMessages[state.chatMessages.length - 1]!.text).toContain(
       'cleared by the room host',
+    );
+  });
+
+  it('maps keyboard hotkeys to whiteboard tools correctly', () => {
+    expect(TOOL_SHORTCUTS['v']).toBe('select');
+    expect(TOOL_SHORTCUTS['V']).toBe('select');
+    expect(TOOL_SHORTCUTS['p']).toBe('pen');
+    expect(TOOL_SHORTCUTS['P']).toBe('pen');
+    expect(TOOL_SHORTCUTS['e']).toBe('eraser');
+    expect(TOOL_SHORTCUTS['E']).toBe('eraser');
+    expect(TOOL_SHORTCUTS['r']).toBe('rectangle');
+    expect(TOOL_SHORTCUTS['R']).toBe('rectangle');
+    expect(TOOL_SHORTCUTS['o']).toBe('ellipse');
+    expect(TOOL_SHORTCUTS['O']).toBe('ellipse');
+    expect(TOOL_SHORTCUTS['t']).toBe('text');
+    expect(TOOL_SHORTCUTS['T']).toBe('text');
+    expect(TOOL_SHORTCUTS['s']).toBe('sticky_note');
+    expect(TOOL_SHORTCUTS['S']).toBe('sticky_note');
+    expect(TOOL_SHORTCUTS['l']).toBe('arrow');
+    expect(TOOL_SHORTCUTS['L']).toBe('arrow');
+  });
+
+  it('detects editable form elements to prevent hotkey hijacking while typing', () => {
+    expect(isEditableElement(null)).toBe(false);
+    expect(isEditableElement({} as EventTarget)).toBe(false);
+    expect(isEditableElement({ tagName: 'DIV' } as EventTarget)).toBe(false);
+    expect(isEditableElement({ tagName: 'INPUT' } as EventTarget)).toBe(true);
+    expect(isEditableElement({ tagName: 'textarea' } as EventTarget)).toBe(true);
+    expect(isEditableElement({ tagName: 'SELECT' } as EventTarget)).toBe(true);
+    expect(isEditableElement({ tagName: 'DIV', isContentEditable: true } as EventTarget)).toBe(
+      true,
     );
   });
 });

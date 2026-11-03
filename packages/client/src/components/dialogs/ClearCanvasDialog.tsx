@@ -87,4 +87,3 @@ export const ClearCanvasDialog: React.FC = () => {
     </div>
   );
 };
-

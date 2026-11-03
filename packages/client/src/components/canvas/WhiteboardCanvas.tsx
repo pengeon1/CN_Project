@@ -17,6 +17,7 @@ import {
   type StrokeObject,
 } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import { isEditableElement } from '../../hooks/useKeyboardShortcuts.js';
 
 interface HoveredAuthorInfo {
   strokeId: string;
@@ -235,7 +236,7 @@ export const WhiteboardCanvas: React.FC = () => {
   // Listen for space key to toggle pan cursor and interaction
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat && (e.target as HTMLElement)?.tagName !== 'INPUT') {
+      if (e.code === 'Space' && !e.repeat && !isEditableElement(e.target)) {
         isSpacePressedRef.current = true;
       }
     };

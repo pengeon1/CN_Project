@@ -45,4 +45,3 @@ export class Logger {
     console.error(this.format('ERROR', message, details));
   }
 }
-

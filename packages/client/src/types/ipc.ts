@@ -1,0 +1,46 @@
+/**
+ * @fileoverview Type definitions for IPC communication between
+ * the Electron Main Process and Renderer Process.
+ */
+
+import type { MessageEnvelope } from '@cn-whiteboard/common';
+
+export type ConnectionStatus =
+  'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+
+export interface ConnectOptions {
+  host: string;
+  port: number;
+  username: string;
+  action: 'create' | 'join';
+  roomName?: string;
+  roomCode?: string;
+  password?: string;
+}
+
+export interface ConnectionStatusEvent {
+  status: ConnectionStatus;
+  error?: string;
+  userId?: string;
+  sessionId?: string;
+  roomCode?: string;
+}
+
+/**
+ * Interface exposed on `window.electronAPI` via contextBridge in preload.ts.
+ */
+export interface ElectronWhiteboardAPI {
+  platform: string;
+  connect: (options: ConnectOptions) => Promise<{ success: boolean; error?: string }>;
+  disconnect: () => Promise<void>;
+  sendMessage: (envelope: MessageEnvelope) => Promise<boolean>;
+  onMessage: (callback: (envelope: MessageEnvelope) => void) => () => void;
+  onStatus: (callback: (status: ConnectionStatusEvent) => void) => () => void;
+  getLanAddresses?: () => Promise<string[]>;
+}
+
+declare global {
+  interface Window {
+    electronAPI?: ElectronWhiteboardAPI;
+  }
+}

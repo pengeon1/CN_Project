@@ -53,4 +53,3 @@ export function parseConfig(argv: string[] = process.argv): ServerConfig {
 
   return { host, port, dataDir, verbose };
 }
-

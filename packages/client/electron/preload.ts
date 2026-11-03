@@ -1,29 +1,43 @@
 /**
  * @fileoverview Electron Preload script.
- * Safely exposes a restricted, typed API to the renderer process via contextBridge.
- * Follows the principle of least privilege: no Node.js primitives or socket handles
- * are ever exposed to the renderer window.
+ * Exposes a strongly-typed, secure bridge to the renderer process.
+ * Renderer has no access to Node.js primitives or socket handles.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { MessageEnvelope } from '@cn-whiteboard/common';
+import type {
+  ConnectOptions,
+  ConnectionStatusEvent,
+  ElectronWhiteboardAPI,
+} from '../src/types/ipc.js';
 
-/**
- * Interface representing the exposed Electron API bridge in the window object.
- */
-export interface ElectronAPI {
-  /**
-   * Returns current application platform ('win32' | 'darwin' | 'linux').
-   */
-  platform: string;
-  /**
-   * Ping IPC channel for sanity verification.
-   */
-  ping: () => Promise<string>;
-}
-
-const api: ElectronAPI = {
+const api: ElectronWhiteboardAPI = {
   platform: process.platform,
-  ping: () => ipcRenderer.invoke('app:ping'),
+
+  connect: (options: ConnectOptions) => ipcRenderer.invoke('tcp:connect', options),
+
+  disconnect: () => ipcRenderer.invoke('tcp:disconnect'),
+
+  sendMessage: (envelope: MessageEnvelope) => ipcRenderer.invoke('tcp:send', envelope),
+
+  onMessage: (callback: (envelope: MessageEnvelope) => void) => {
+    const handler = (_event: IpcRendererEvent, envelope: MessageEnvelope) => callback(envelope);
+    ipcRenderer.on('tcp:message', handler);
+    return () => {
+      ipcRenderer.removeListener('tcp:message', handler);
+    };
+  },
+
+  onStatus: (callback: (status: ConnectionStatusEvent) => void) => {
+    const handler = (_event: IpcRendererEvent, status: ConnectionStatusEvent) => callback(status);
+    ipcRenderer.on('tcp:status', handler);
+    return () => {
+      ipcRenderer.removeListener('tcp:status', handler);
+    };
+  },
+
+  getLanAddresses: () => ipcRenderer.invoke('net:get-lan-ips'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

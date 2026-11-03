@@ -6,17 +6,37 @@
  * - nodeIntegration: false (strictly isolates Node.js APIs from the web renderer)
  * - sandbox: true (enforces OS-level chromium sandboxing for the renderer)
  *
- * All network sockets and low-level TCP connection management will be orchestrated
+ * All network sockets and low-level TCP connection management are orchestrated
  * here in the main process, never inside the renderer thread.
  */
 
-import { app, BrowserWindow } from 'electron';
+import * as os from 'node:os';
 import * as path from 'node:path';
+import { app, BrowserWindow, ipcMain } from 'electron';
+import type { MessageEnvelope } from '@cn-whiteboard/common';
+import type { ConnectOptions } from '../src/types/ipc.js';
+import { MainTcpClient } from './tcp-client.js';
 
 let mainWindow: BrowserWindow | null = null;
+let tcpClient: MainTcpClient | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+
+function getLanAddresses(): string[] {
+  const interfaces = os.networkInterfaces();
+  const addresses: string[] = [];
+  for (const key of Object.keys(interfaces)) {
+    const netDetails = interfaces[key];
+    if (!netDetails) continue;
+    for (const detail of netDetails) {
+      if (detail.family === 'IPv4' && !detail.internal) {
+        addresses.push(detail.address);
+      }
+    }
+  }
+  return addresses;
+}
 
 /**
  * Creates and initializes the primary application window.
@@ -41,8 +61,9 @@ function createMainWindow(): BrowserWindow {
     win.show();
   });
 
+  tcpClient = new MainTcpClient(win);
+
   if (isDev) {
-    // Retry connecting to Vite dev server in case it is still booting
     const loadUrlWithRetry = async (url: string, attempts = 30) => {
       for (let i = 0; i < attempts; i++) {
         try {
@@ -58,16 +79,38 @@ function createMainWindow(): BrowserWindow {
 
     loadUrlWithRetry(VITE_DEV_SERVER_URL);
   } else {
-    // Load built production static assets
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
   win.on('closed', () => {
+    tcpClient?.disconnect();
+    tcpClient = null;
     mainWindow = null;
   });
 
   return win;
 }
+
+// IPC Handlers
+ipcMain.handle('tcp:connect', async (_event, options: ConnectOptions) => {
+  if (!tcpClient) {
+    return { success: false, error: 'TCP Client uninitialized' };
+  }
+  return tcpClient.connect(options);
+});
+
+ipcMain.handle('tcp:disconnect', async () => {
+  tcpClient?.disconnect();
+});
+
+ipcMain.handle('tcp:send', async (_event, envelope: MessageEnvelope) => {
+  if (!tcpClient) return false;
+  return tcpClient.send(envelope);
+});
+
+ipcMain.handle('net:get-lan-ips', async () => {
+  return getLanAddresses();
+});
 
 app.whenReady().then(() => {
   mainWindow = createMainWindow();
@@ -80,15 +123,11 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  // On macOS applications typically stay active until user explicitly quits (Cmd+Q)
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-/**
- * Returns the active main BrowserWindow instance, or null if uninitialized/closed.
- */
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
 }

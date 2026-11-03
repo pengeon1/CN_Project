@@ -7,13 +7,18 @@
 import * as net from 'node:net';
 import * as os from 'node:os';
 import {
+  canMutateCanvas,
   createEnvelope,
+  type CursorMovePayload,
   generateUuid,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
   type MessageEnvelope,
   MessageType,
   PROTOCOL_VERSION,
+  type StrokeBeginPayload,
+  type StrokeEndPayload,
+  type StrokePointsPayload,
   validatePayload,
 } from '@cn-whiteboard/common';
 import { Logger } from './logger.js';
@@ -265,12 +270,123 @@ export class WhiteboardServer {
         break;
       }
 
+      case MessageType.STROKE_BEGIN: {
+        if (!session.roomCode) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'NOT_IN_ROOM', message: 'You must join a room first' },
+              { user_id: session.userId },
+            ),
+          );
+          return;
+        }
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room) return;
+
+        if (!canMutateCanvas(session.role)) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'FORBIDDEN', message: 'Viewer role cannot mutate canvas' },
+              { room: room.code, user_id: session.userId },
+            ),
+          );
+          return;
+        }
+
+        const payload = validatePayload<StrokeBeginPayload>(
+          MessageType.STROKE_BEGIN,
+          envelope.payload,
+        );
+
+        await room.enqueue(async () => {
+          const stroke = room.applyStrokeBegin(
+            payload.op_id,
+            payload.strokeId,
+            session.userId,
+            payload.color,
+            payload.width,
+            payload.startPoint,
+          );
+          const broadcastEnvelope = createEnvelope(MessageType.STROKE_BEGIN, payload, {
+            msg_id: envelope.msg_id,
+            seq: stroke.seq,
+            room: room.code,
+            user_id: session.userId,
+            ts: stroke.updatedAt,
+          });
+          room.broadcast(broadcastEnvelope);
+        });
+        break;
+      }
+
+      case MessageType.STROKE_POINTS: {
+        if (!session.roomCode) return;
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room || !canMutateCanvas(session.role)) return;
+
+        const payload = validatePayload<StrokePointsPayload>(
+          MessageType.STROKE_POINTS,
+          envelope.payload,
+        );
+
+        await room.enqueue(async () => {
+          const stroke = room.applyStrokePoints(payload.op_id, payload.strokeId, payload.points);
+          if (!stroke) return;
+
+          const broadcastEnvelope = createEnvelope(MessageType.STROKE_POINTS, payload, {
+            msg_id: envelope.msg_id,
+            seq: stroke.seq,
+            room: room.code,
+            user_id: session.userId,
+            ts: stroke.updatedAt,
+          });
+          room.broadcast(broadcastEnvelope);
+        });
+        break;
+      }
+
+      case MessageType.STROKE_END: {
+        if (!session.roomCode) return;
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room || !canMutateCanvas(session.role)) return;
+
+        const payload = validatePayload<StrokeEndPayload>(MessageType.STROKE_END, envelope.payload);
+
+        await room.enqueue(async () => {
+          const stroke = room.applyStrokeEnd(payload.op_id, payload.strokeId, payload.finalPoint);
+          if (!stroke) return;
+
+          const broadcastEnvelope = createEnvelope(MessageType.STROKE_END, payload, {
+            msg_id: envelope.msg_id,
+            seq: stroke.seq,
+            room: room.code,
+            user_id: session.userId,
+            ts: stroke.updatedAt,
+          });
+          room.broadcast(broadcastEnvelope);
+        });
+        break;
+      }
+
       case MessageType.CURSOR_MOVE: {
         if (session.roomCode) {
           const room = this.roomManager.getRoom(session.roomCode);
           if (room) {
+            const payload = validatePayload<CursorMovePayload>(
+              MessageType.CURSOR_MOVE,
+              envelope.payload,
+            );
+            const cursorEnvelope = createEnvelope(MessageType.CURSOR_MOVE, payload, {
+              msg_id: envelope.msg_id,
+              seq: 0,
+              room: room.code,
+              user_id: session.userId,
+              ts: Date.now(),
+            });
             // Ephemeral broadcast to peers, skipping sender
-            room.broadcast(envelope, session.userId);
+            room.broadcast(cursorEnvelope, session.userId);
           }
         }
         break;

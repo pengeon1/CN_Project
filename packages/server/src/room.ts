@@ -1,6 +1,6 @@
 /**
  * @fileoverview Room state container, participant coordinator, sequence sequencing,
- * and operation serial queue implementation.
+ * whiteboard object store, and operation serial queue implementation.
  */
 
 import {
@@ -9,8 +9,10 @@ import {
   MessageType,
   type Participant,
   PARTICIPANT_COLORS,
+  type Point,
   Role,
   type RoomSnapshot,
+  type StrokeObject,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
 import { Logger } from './logger.js';
@@ -39,6 +41,7 @@ export class Room {
 
   private participants: Map<string, RoomParticipantEntry> = new Map();
   private objects: Map<string, WhiteboardObject> = new Map();
+  private processedOpIds: Set<string> = new Set();
   private colorIndex: number = 0;
   private serialQueue: Promise<void> = Promise.resolve();
   private logger: Logger;
@@ -76,6 +79,106 @@ export class Room {
   public nextSeq(): number {
     this.seq += 1;
     return this.seq;
+  }
+
+  /**
+   * Checks whether an operation with op_id has already been processed (idempotency check).
+   */
+  public hasProcessedOp(opId: string): boolean {
+    return this.processedOpIds.has(opId);
+  }
+
+  /**
+   * Records an op_id as processed, bounding the retention set to the most recent 10,000 ops.
+   */
+  public markOpProcessed(opId: string): void {
+    if (this.processedOpIds.size > 10000) {
+      const first = this.processedOpIds.values().next().value;
+      if (first) this.processedOpIds.delete(first);
+    }
+    this.processedOpIds.add(opId);
+  }
+
+  /**
+   * Creates a new StrokeObject and registers it into the room's canvas state.
+   */
+  public applyStrokeBegin(
+    opId: string,
+    strokeId: string,
+    authorId: string,
+    color: string,
+    width: number,
+    startPoint: Point,
+  ): StrokeObject {
+    if (this.hasProcessedOp(opId)) {
+      const existing = this.objects.get(strokeId);
+      if (existing && existing.type === 'stroke') {
+        return existing;
+      }
+    }
+    this.markOpProcessed(opId);
+    const seq = this.nextSeq();
+    const stroke: StrokeObject = {
+      id: strokeId,
+      authorId,
+      seq,
+      zIndex: this.objects.size + 1,
+      updatedAt: Date.now(),
+      type: 'stroke',
+      color,
+      width,
+      points: [startPoint],
+      isComplete: false,
+    };
+    this.objects.set(strokeId, stroke);
+    return stroke;
+  }
+
+  /**
+   * Appends batched points to an active freehand stroke.
+   */
+  public applyStrokePoints(opId: string, strokeId: string, points: Point[]): StrokeObject | null {
+    if (this.hasProcessedOp(opId)) {
+      const existing = this.objects.get(strokeId);
+      return existing && existing.type === 'stroke' ? existing : null;
+    }
+    this.markOpProcessed(opId);
+    const obj = this.objects.get(strokeId);
+    if (!obj || obj.type !== 'stroke') {
+      return null;
+    }
+    const seq = this.nextSeq();
+    obj.seq = seq;
+    obj.updatedAt = Date.now();
+    obj.points.push(...points);
+    return obj;
+  }
+
+  /**
+   * Finalizes a freehand stroke and marks it complete.
+   */
+  public applyStrokeEnd(opId: string, strokeId: string, finalPoint?: Point): StrokeObject | null {
+    if (this.hasProcessedOp(opId)) {
+      const existing = this.objects.get(strokeId);
+      return existing && existing.type === 'stroke' ? existing : null;
+    }
+    this.markOpProcessed(opId);
+    const obj = this.objects.get(strokeId);
+    if (!obj || obj.type !== 'stroke') {
+      return null;
+    }
+    const seq = this.nextSeq();
+    obj.seq = seq;
+    obj.updatedAt = Date.now();
+    if (finalPoint) {
+      obj.points.push(finalPoint);
+    }
+    obj.isComplete = true;
+    return obj;
+  }
+
+  public getObject(id: string): WhiteboardObject | undefined {
+    return this.objects.get(id);
   }
 
   /**

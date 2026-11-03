@@ -1,11 +1,13 @@
 /**
  * @fileoverview Central Zustand store for the whiteboard application.
  * Manages reactive UI state, canvas viewport, room synchronization,
- * participants, and active tool properties.
+ * participants, active tool properties, freehand stroke collections,
+ * and ephemeral remote cursors.
  */
 
 import { create } from 'zustand';
 import {
+  canMutateCanvas,
   createEnvelope,
   generateUuid,
   type MessageEnvelope,
@@ -14,8 +16,16 @@ import {
   type ParticipantJoinedPayload,
   type ParticipantLeftPayload,
   type ParticipantListPayload,
+  type Point,
+  type RemoteCursor,
   Role,
   type RoomStatePayload,
+  type StrokeBeginPayload,
+  type StrokeEndPayload,
+  type StrokeObject,
+  type StrokePointsPayload,
+  type CursorMovePayload,
+  type WhiteboardObject,
 } from '@cn-whiteboard/common';
 import type { ConnectionStatus, ConnectOptions } from '../types/ipc.js';
 
@@ -51,6 +61,12 @@ export interface WhiteboardState {
   roomInfo: { code: string; name: string; isHost: boolean; locked: boolean } | null;
   currentUser: { id: string; username: string; color: string; role: Role } | null;
   participants: Participant[];
+
+  // Whiteboard canvas objects & cursors
+  objects: Record<string, WhiteboardObject>;
+  liveLocalStroke: StrokeObject | null;
+  remoteCursors: Record<string, RemoteCursor>;
+  lastAppliedSeq: number;
 
   // Chat state
   chatMessages: ChatEntry[];
@@ -89,6 +105,20 @@ export interface WhiteboardState {
   connectToServer: (options: ConnectOptions) => Promise<boolean>;
   disconnectFromServer: () => Promise<void>;
   handleIncomingEnvelope: (envelope: MessageEnvelope) => void;
+
+  // Drawing & Cursor actions
+  startDrawing: (startPoint: Point) => void;
+  updateLocalLivePoint: (point: Point) => void;
+  appendDrawingPoints: (points: Point[]) => void;
+  finishDrawing: (finalPoint?: Point) => void;
+  broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
+}
+
+function getElectronAPI() {
+  if (typeof window !== 'undefined' && window.electronAPI) {
+    return window.electronAPI;
+  }
+  return undefined;
 }
 
 export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
@@ -98,6 +128,11 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   roomInfo: null,
   currentUser: null,
   participants: [],
+
+  objects: {},
+  liveLocalStroke: null,
+  remoteCursors: {},
+  lastAppliedSeq: 0,
 
   chatMessages: [],
   unreadChatCount: 0,
@@ -179,12 +214,13 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   sendChatMessage: (text) => {
     const { currentUser, roomInfo } = get();
-    if (!currentUser || !roomInfo || !text.trim()) return;
+    if (!text.trim() || !currentUser || !roomInfo) return;
 
-    const chatMsg = createEnvelope(
+    const chatMsgId = generateUuid();
+    const chatEnvelope = createEnvelope(
       MessageType.CHAT_MESSAGE,
       {
-        id: generateUuid(),
+        id: chatMsgId,
         text: text.trim(),
         username: currentUser.username,
         color: currentUser.color,
@@ -195,36 +231,36 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       },
     );
 
-    // Optimistically push to local chat
-    const localEntry: ChatEntry = {
-      id: chatMsg.msg_id,
-      userId: currentUser.id,
-      username: currentUser.username,
-      color: currentUser.color,
-      text: text.trim(),
-      ts: Date.now(),
-    };
-
-    set((state) => ({
-      chatMessages: [...state.chatMessages, localEntry],
-    }));
-
-    if (window.electronAPI) {
-      window.electronAPI.sendMessage(chatMsg);
+    const api = getElectronAPI();
+    if (api) {
+      api.sendMessage(chatEnvelope);
+    } else {
+      // Local fallback in mock/browser mode
+      const localEntry: ChatEntry = {
+        id: chatMsgId,
+        userId: currentUser.id,
+        username: currentUser.username,
+        color: currentUser.color,
+        text: text.trim(),
+        ts: Date.now(),
+      };
+      set((state) => ({
+        chatMessages: [...state.chatMessages, localEntry],
+      }));
     }
   },
 
   connectToServer: async (options) => {
-    set({
-      connectionStatus: 'connecting',
-      connectionError: null,
-      serverInfo: { host: options.host, port: options.port },
-    });
+    set({ connectionStatus: 'connecting', connectionError: null });
 
-    if (window.electronAPI) {
-      const res = await window.electronAPI.connect(options);
+    const api = getElectronAPI();
+    if (api) {
+      const res = await api.connect(options);
       if (!res.success) {
-        set({ connectionStatus: 'error', connectionError: res.error || 'Failed to connect' });
+        set({
+          connectionStatus: 'error',
+          connectionError: res.error || 'Connection failed',
+        });
         return false;
       }
       return true;
@@ -263,8 +299,9 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   disconnectFromServer: async () => {
-    if (window.electronAPI) {
-      await window.electronAPI.disconnect();
+    const api = getElectronAPI();
+    if (api) {
+      await api.disconnect();
     }
     set({
       connectionStatus: 'disconnected',
@@ -272,7 +309,135 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       currentUser: null,
       participants: [],
       chatMessages: [],
+      objects: {},
+      liveLocalStroke: null,
+      remoteCursors: {},
+      lastAppliedSeq: 0,
     });
+  },
+
+  startDrawing: (startPoint) => {
+    const { currentUser, roomInfo, toolProps, objects } = get();
+    if (currentUser && !canMutateCanvas(currentUser.role)) {
+      return;
+    }
+    if (roomInfo?.locked && currentUser?.role !== Role.HOST) {
+      return;
+    }
+
+    const strokeId = generateUuid();
+    const op_id = generateUuid();
+    const authorId = currentUser ? currentUser.id : 'local-user';
+
+    const stroke: StrokeObject = {
+      id: strokeId,
+      authorId,
+      seq: 0,
+      zIndex: Object.keys(objects).length + 1,
+      updatedAt: Date.now(),
+      type: 'stroke',
+      color: toolProps.color,
+      width: toolProps.width,
+      points: [startPoint],
+      isComplete: false,
+    };
+
+    set({ liveLocalStroke: stroke });
+
+    const api = getElectronAPI();
+    if (api && roomInfo && currentUser) {
+      api.sendMessage(
+        createEnvelope(
+          MessageType.STROKE_BEGIN,
+          {
+            op_id,
+            strokeId,
+            color: toolProps.color,
+            width: toolProps.width,
+            startPoint,
+          },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
+
+  updateLocalLivePoint: (point) => {
+    const { liveLocalStroke } = get();
+    if (!liveLocalStroke) return;
+    liveLocalStroke.points.push(point);
+    set({ liveLocalStroke: { ...liveLocalStroke } });
+  },
+
+  appendDrawingPoints: (points) => {
+    const { liveLocalStroke, currentUser, roomInfo } = get();
+    if (!liveLocalStroke || points.length === 0) return;
+
+    const api = getElectronAPI();
+    if (api && roomInfo && currentUser) {
+      const op_id = generateUuid();
+      api.sendMessage(
+        createEnvelope(
+          MessageType.STROKE_POINTS,
+          {
+            op_id,
+            strokeId: liveLocalStroke.id,
+            points,
+          },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
+
+  finishDrawing: (finalPoint) => {
+    const { liveLocalStroke, currentUser, roomInfo, objects } = get();
+    if (!liveLocalStroke) return;
+
+    if (finalPoint) {
+      liveLocalStroke.points.push(finalPoint);
+    }
+    liveLocalStroke.isComplete = true;
+
+    set({
+      objects: { ...objects, [liveLocalStroke.id]: liveLocalStroke },
+      liveLocalStroke: null,
+    });
+
+    const api = getElectronAPI();
+    if (api && roomInfo && currentUser) {
+      const op_id = generateUuid();
+      api.sendMessage(
+        createEnvelope(
+          MessageType.STROKE_END,
+          {
+            op_id,
+            strokeId: liveLocalStroke.id,
+            finalPoint,
+          },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
+
+  broadcastCursorPosition: (x, y, pressure) => {
+    const { currentUser, roomInfo, activeTool } = get();
+    const api = getElectronAPI();
+    if (!currentUser || !roomInfo || !api) return;
+
+    api.sendMessage(
+      createEnvelope(
+        MessageType.CURSOR_MOVE,
+        {
+          x,
+          y,
+          activeTool,
+          pressure,
+        },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
   },
 
   handleIncomingEnvelope: (envelope) => {
@@ -299,6 +464,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
               }
             : null,
           participants: payload.participants,
+          objects: payload.objects || {},
+          lastAppliedSeq: payload.seq || 0,
+          remoteCursors: {},
+          liveLocalStroke: null,
           chatMessages: payload.chatHistory.map((m) => ({
             id: m.id,
             userId: m.userId,
@@ -309,6 +478,100 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             isSystem: m.isSystem,
           })),
           connectModalOpen: false,
+        });
+        break;
+      }
+
+      case MessageType.STROKE_BEGIN: {
+        const payload = envelope.payload as StrokeBeginPayload;
+        set((state) => {
+          if (state.liveLocalStroke && state.liveLocalStroke.id === payload.strokeId) {
+            state.liveLocalStroke.seq = envelope.seq;
+          }
+
+          const existing = state.objects[payload.strokeId];
+          const stroke: StrokeObject =
+            existing && existing.type === 'stroke'
+              ? { ...existing, seq: envelope.seq }
+              : {
+                  id: payload.strokeId,
+                  authorId: envelope.user_id,
+                  seq: envelope.seq,
+                  zIndex: Object.keys(state.objects).length + 1,
+                  updatedAt: envelope.ts,
+                  type: 'stroke',
+                  color: payload.color,
+                  width: payload.width,
+                  points: [payload.startPoint],
+                  isComplete: false,
+                };
+
+          return {
+            objects: { ...state.objects, [payload.strokeId]: stroke },
+            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
+          };
+        });
+        break;
+      }
+
+      case MessageType.STROKE_POINTS: {
+        const payload = envelope.payload as StrokePointsPayload;
+        set((state) => {
+          const obj = state.objects[payload.strokeId];
+          if (!obj || obj.type !== 'stroke') return state;
+
+          if (envelope.user_id !== state.currentUser?.id) {
+            obj.points.push(...payload.points);
+          }
+          obj.seq = envelope.seq;
+          obj.updatedAt = envelope.ts;
+
+          return {
+            objects: { ...state.objects, [payload.strokeId]: { ...obj } },
+            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
+          };
+        });
+        break;
+      }
+
+      case MessageType.STROKE_END: {
+        const payload = envelope.payload as StrokeEndPayload;
+        set((state) => {
+          const obj = state.objects[payload.strokeId];
+          if (!obj || obj.type !== 'stroke') return state;
+
+          if (envelope.user_id !== state.currentUser?.id && payload.finalPoint) {
+            obj.points.push(payload.finalPoint);
+          }
+          obj.isComplete = true;
+          obj.seq = envelope.seq;
+          obj.updatedAt = envelope.ts;
+
+          return {
+            objects: { ...state.objects, [payload.strokeId]: { ...obj } },
+            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
+          };
+        });
+        break;
+      }
+
+      case MessageType.CURSOR_MOVE: {
+        const payload = envelope.payload as CursorMovePayload;
+        set((state) => {
+          const participant = state.participants.find((p) => p.id === envelope.user_id);
+          const cursor: RemoteCursor = {
+            userId: envelope.user_id,
+            username: participant?.username || 'Peer',
+            color: participant?.color || '#3B82F6',
+            x: payload.x,
+            y: payload.y,
+            activeTool: payload.activeTool,
+            pressure: payload.pressure,
+          };
+
+          return {
+            remoteCursors: { ...state.remoteCursors, [envelope.user_id]: cursor },
+          };
         });
         break;
       }
@@ -347,6 +610,9 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         const payload = envelope.payload as ParticipantLeftPayload;
         set((state) => {
           const updated = state.participants.filter((p) => p.id !== payload.userId);
+          const updatedCursors = { ...state.remoteCursors };
+          delete updatedCursors[payload.userId];
+
           const systemNotice: ChatEntry = {
             id: generateUuid(),
             userId: payload.userId,
@@ -359,6 +625,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
           return {
             participants: updated,
+            remoteCursors: updatedCursors,
             chatMessages: [...state.chatMessages, systemNotice],
           };
         });

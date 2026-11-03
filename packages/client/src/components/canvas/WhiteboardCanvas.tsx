@@ -1,23 +1,244 @@
 /**
  * @fileoverview Main canvas viewport with razor-sharp dot-grid background,
- * adaptive zoom grid spacing (preventing dot overlap at any scale),
- * high-DPI (Retina) scaling, panning, zooming, and non-overlapping controls.
+ * high-DPI (Retina) scaling, panning, zooming, real-time freehand stroke rendering
+ * using perfect-freehand, batched transmission, throttled cursor broadcasting,
+ * remote live cursors with name tags, and author hover attribution.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { getStroke } from 'perfect-freehand';
+import {
+  CURSOR_THROTTLE_MS,
+  type Point,
+  type RemoteCursor,
+  STROKE_BATCH_INTERVAL_MS,
+  type StrokeObject,
+} from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
+interface HoveredAuthorInfo {
+  strokeId: string;
+  authorName: string;
+  authorColor: string;
+  screenX: number;
+  screenY: number;
+}
+
+/**
+ * Renders a single freehand stroke onto the 2D canvas using perfect-freehand outline polygon.
+ */
+function renderStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: StrokeObject,
+  isHovered = false,
+): void {
+  if (stroke.points.length === 0) return;
+
+  const outline = getStroke(stroke.points, {
+    size: stroke.width,
+    thinning: 0.5,
+    smoothing: 0.5,
+    streamline: 0.5,
+    simulatePressure: stroke.points.every((p) => p.pressure === undefined),
+    last: stroke.isComplete,
+  });
+
+  if (outline.length < 2) {
+    if (stroke.points.length === 1 && stroke.points[0]) {
+      const pt = stroke.points[0];
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, stroke.width / 2, 0, Math.PI * 2);
+      ctx.fillStyle = stroke.color;
+      ctx.fill();
+    }
+    return;
+  }
+
+  const firstPoint = outline[0];
+  if (!firstPoint) return;
+  const [x0, y0] = firstPoint;
+
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  for (let i = 0; i < outline.length; i++) {
+    const curr = outline[i];
+    const next = outline[(i + 1) % outline.length];
+    if (!curr || !next) continue;
+    const [cx, cy] = curr;
+    const [nx, ny] = next;
+    const mx = (cx + nx) / 2;
+    const my = (cy + ny) / 2;
+    ctx.quadraticCurveTo(cx, cy, mx, my);
+  }
+  ctx.closePath();
+
+  ctx.fillStyle = stroke.color;
+  ctx.fill();
+
+  // If selected or hovered with Select tool, draw accent halo
+  if (isHovered) {
+    ctx.save();
+    ctx.strokeStyle = '#38BDF8';
+    ctx.lineWidth = Math.max(2, stroke.width * 0.3);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/**
+ * Renders a remote user's pointer arrow and name tag in screen space coordinates.
+ */
+function renderRemoteCursor(
+  ctx: CanvasRenderingContext2D,
+  cursor: RemoteCursor,
+  screenX: number,
+  screenY: number,
+): void {
+  ctx.save();
+  ctx.translate(screenX, screenY);
+
+  // 1. Draw crisp arrow pointer
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, 15);
+  ctx.lineTo(4.5, 11.5);
+  ctx.lineTo(7.5, 18);
+  ctx.lineTo(10.5, 16.5);
+  ctx.lineTo(7.5, 10.5);
+  ctx.lineTo(13, 10.5);
+  ctx.closePath();
+
+  ctx.fillStyle = cursor.color;
+  ctx.fill();
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // 2. Draw user name tag pill
+  ctx.font = '600 11px Inter, system-ui, sans-serif';
+  const nameText = cursor.username;
+  const metrics = ctx.measureText(nameText);
+  const badgeWidth = metrics.width + 12;
+  const badgeHeight = 20;
+  const badgeX = 14;
+  const badgeY = 12;
+  const radius = 4;
+
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, radius);
+  ctx.fillStyle = cursor.color;
+  ctx.fill();
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(nameText, badgeX + 6, badgeY + badgeHeight / 2);
+
+  ctx.restore();
+}
+
+/**
+ * Calculates shortest distance from a world point (px, py) to a stroke's path points.
+ */
+function getDistanceToStroke(px: number, py: number, stroke: StrokeObject): number {
+  if (stroke.points.length === 0) return Infinity;
+
+  let minDistanceSq = Infinity;
+  for (const pt of stroke.points) {
+    const dx = px - pt.x;
+    const dy = py - pt.y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq < minDistanceSq) {
+      minDistanceSq = distSq;
+    }
+  }
+
+  return Math.sqrt(minDistanceSq);
+}
+
 export const WhiteboardCanvas: React.FC = () => {
-  const { zoom, panX, panY, setZoom, adjustPan, resetView, isDarkTheme } = useWhiteboardStore();
+  const {
+    zoom,
+    panX,
+    panY,
+    setZoom,
+    adjustPan,
+    resetView,
+    isDarkTheme,
+    activeTool,
+    objects,
+    liveLocalStroke,
+    remoteCursors,
+    participants,
+    currentUser,
+    startDrawing,
+    updateLocalLivePoint,
+    appendDrawingPoints,
+    finishDrawing,
+    broadcastCursorPosition,
+  } = useWhiteboardStore();
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Navigation state
   const [isPanning, setIsPanning] = useState(false);
   const lastMousePos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const isSpacePressedRef = useRef(false);
+
+  // Listen for space key to toggle pan cursor and interaction
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && (e.target as HTMLElement)?.tagName !== 'INPUT') {
+        isSpacePressedRef.current = true;
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        isSpacePressedRef.current = false;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // Drawing state
+  const isDrawingRef = useRef(false);
+  const pendingPointsRef = useRef<Point[]>([]);
+  const lastBatchSendRef = useRef<number>(0);
+  const lastCursorSendRef = useRef<number>(0);
+
+  // Author attribution tooltip state
+  const [hoveredAuthor, setHoveredAuthor] = useState<HoveredAuthorInfo | null>(null);
+
+  /**
+   * Transforms screen (client) coordinates into whiteboard world coordinates.
+   */
+  const screenToWorld = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } => {
+      const container = containerRef.current;
+      if (!container) return { x: 0, y: 0 };
+      const rect = container.getBoundingClientRect();
+      const screenX = clientX - rect.left;
+      const screenY = clientY - rect.top;
+      const x = screenX / zoom - panX;
+      const y = screenY / zoom - panY;
+      return { x, y };
+    },
+    [zoom, panX, panY],
+  );
 
   /**
    * Razor-sharp high-DPI canvas rendering routine.
-   * Uses adaptive grid spacing so dots NEVER overlap regardless of zoom level (10% to 500%).
+   * Renders dot grid, committed strokes, live optimistic local stroke,
+   * selection highlights, and remote user cursors.
    */
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -49,13 +270,11 @@ export const WhiteboardCanvas: React.FC = () => {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // Background fill
+    // 1. Background fill
     ctx.fillStyle = isDarkTheme ? '#0B0F19' : '#F8FAFC';
     ctx.fillRect(0, 0, width, height);
 
-    // Adaptive grid spacing (Figma/FigJam style):
-    // Keeps grid spacing between 20px and 60px on screen at all times.
-    // Prevents dots from ever crowding or overlapping when zooming out.
+    // 2. Adaptive dot-grid spacing (Figma/FigJam style)
     const baseGrid = 24;
     let gridSize = baseGrid * zoom;
     while (gridSize < 20) {
@@ -65,17 +284,12 @@ export const WhiteboardCanvas: React.FC = () => {
       gridSize /= 2;
     }
 
-    // Razor-sharp constant dot radius
     const dotRadius = 1.25;
-
-    // Subtle, non-intrusive dot colors
     ctx.fillStyle = isDarkTheme ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.35)';
 
-    // Wrap offset cleanly across negative and positive pan values
     const startX = (((panX * zoom) % gridSize) + gridSize) % gridSize;
     const startY = (((panY * zoom) % gridSize) + gridSize) % gridSize;
 
-    // Draw dots snapping to integer pixel centers to eliminate blur and ensure zero overlap
     for (let x = startX; x < width; x += gridSize) {
       const px = Math.round(x);
       for (let y = startY; y < height; y += gridSize) {
@@ -85,9 +299,49 @@ export const WhiteboardCanvas: React.FC = () => {
         ctx.fill();
       }
     }
-  }, [zoom, panX, panY, isDarkTheme]);
 
-  // Re-render when viewport or theme properties change
+    // 3. World space transformations for whiteboard elements
+    ctx.save();
+    ctx.scale(zoom, zoom);
+    ctx.translate(panX, panY);
+
+    // Sort committed strokes by zIndex
+    const strokeList = Object.values(objects)
+      .filter((obj): obj is StrokeObject => obj.type === 'stroke')
+      .sort((a, b) => a.zIndex - b.zIndex);
+
+    for (const stroke of strokeList) {
+      const isHovered = hoveredAuthor?.strokeId === stroke.id;
+      renderStroke(ctx, stroke, isHovered);
+    }
+
+    // Render active local in-progress stroke with 60 FPS optimistic smoothness
+    if (liveLocalStroke) {
+      renderStroke(ctx, liveLocalStroke, false);
+    }
+
+    ctx.restore();
+
+    // 4. Screen space elements (remote cursors & labels remain constant physical size)
+    for (const cursor of Object.values(remoteCursors)) {
+      const sx = (cursor.x + panX) * zoom;
+      const sy = (cursor.y + panY) * zoom;
+      if (sx >= -50 && sx <= width + 50 && sy >= -50 && sy <= height + 50) {
+        renderRemoteCursor(ctx, cursor, sx, sy);
+      }
+    }
+  }, [
+    zoom,
+    panX,
+    panY,
+    isDarkTheme,
+    objects,
+    liveLocalStroke,
+    remoteCursors,
+    hoveredAuthor?.strokeId,
+  ]);
+
+  // Continuously request animation frame when rendering changes
   useEffect(() => {
     const animationFrameId = requestAnimationFrame(renderCanvas);
     return () => cancelAnimationFrame(animationFrameId);
@@ -106,36 +360,159 @@ export const WhiteboardCanvas: React.FC = () => {
     return () => observer.disconnect();
   }, [renderCanvas]);
 
-  // Pan via Space + Drag or Middle Mouse
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 1 || e.spaceKey || (e.buttons === 1 && e.altKey)) {
+  // Pointer event handlers
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Middle click or Space/Alt + Primary triggers pan
+    if (e.button === 1 || isSpacePressedRef.current || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
+      e.preventDefault();
+      return;
+    }
+
+    // Pen tool draws freehand strokes
+    if (e.button === 0 && activeTool === 'pen') {
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      const pressure = e.pressure !== 0.5 && e.pressure !== 0 ? e.pressure : undefined;
+      const startPoint: Point = { x, y, pressure };
+
+      isDrawingRef.current = true;
+      pendingPointsRef.current = [];
+      lastBatchSendRef.current = Date.now();
+
+      startDrawing(startPoint);
+      containerRef.current?.setPointerCapture(e.pointerId);
       e.preventDefault();
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const { x, y } = screenToWorld(e.clientX, e.clientY);
+    const now = Date.now();
+
+    // Panning
     if (isPanning) {
       const dx = (e.clientX - lastMousePos.current.x) / zoom;
       const dy = (e.clientY - lastMousePos.current.y) / zoom;
       adjustPan(dx, dy);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    // Active Drawing
+    if (isDrawingRef.current && activeTool === 'pen') {
+      const pressure = e.pressure !== 0.5 && e.pressure !== 0 ? e.pressure : undefined;
+      const pt: Point = { x, y, pressure };
+
+      // Immediate optimistic local update
+      updateLocalLivePoint(pt);
+      pendingPointsRef.current.push(pt);
+
+      // Batched transmission to server
+      if (
+        now - lastBatchSendRef.current >= STROKE_BATCH_INTERVAL_MS &&
+        pendingPointsRef.current.length > 0
+      ) {
+        appendDrawingPoints(pendingPointsRef.current);
+        pendingPointsRef.current = [];
+        lastBatchSendRef.current = now;
+      }
+    }
+
+    // Throttled cursor broadcast
+    if (now - lastCursorSendRef.current >= CURSOR_THROTTLE_MS) {
+      broadcastCursorPosition(x, y, e.pressure);
+      lastCursorSendRef.current = now;
+    }
+
+    // Select Tool: hit test for author hover attribution
+    if (activeTool === 'select' && !isPanning && !isDrawingRef.current) {
+      let closestStroke: StrokeObject | null = null;
+      let minDistance = 12; // tolerance in canvas world units
+
+      for (const obj of Object.values(objects)) {
+        if (obj.type === 'stroke') {
+          const dist = getDistanceToStroke(x, y, obj);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestStroke = obj;
+          }
+        }
+      }
+
+      if (closestStroke) {
+        const author =
+          participants.find((p) => p.id === closestStroke!.authorId) ||
+          (closestStroke.authorId === currentUser?.id
+            ? { username: currentUser.username, color: currentUser.color }
+            : { username: 'Author', color: closestStroke.color });
+
+        const container = containerRef.current;
+        const rect = container?.getBoundingClientRect();
+        const screenX = e.clientX - (rect?.left || 0);
+        const screenY = e.clientY - (rect?.top || 0);
+
+        setHoveredAuthor({
+          strokeId: closestStroke.id,
+          authorName: author.username,
+          authorColor: author.color,
+          screenX,
+          screenY,
+        });
+      } else {
+        if (hoveredAuthor) {
+          setHoveredAuthor(null);
+        }
+      }
     }
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanning) {
+      setIsPanning(false);
+    }
+
+    if (isDrawingRef.current && activeTool === 'pen') {
+      isDrawingRef.current = false;
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      const pressure = e.pressure !== 0.5 && e.pressure !== 0 ? e.pressure : undefined;
+      const finalPoint: Point = { x, y, pressure };
+
+      // Flush remaining batch points
+      if (pendingPointsRef.current.length > 0) {
+        appendDrawingPoints(pendingPointsRef.current);
+        pendingPointsRef.current = [];
+      }
+
+      finishDrawing(finalPoint);
+      try {
+        containerRef.current?.releasePointerCapture(e.pointerId);
+      } catch {
+        // Pointer capture may have already been released
+      }
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDrawingRef.current) {
+      isDrawingRef.current = false;
+      finishDrawing();
+      try {
+        containerRef.current?.releasePointerCapture(e.pointerId);
+      } catch {
+        // Ignore
+      }
+    }
     setIsPanning(false);
   };
 
-  // Zoom via Ctrl/Cmd + Wheel
+  // Zoom via Ctrl/Cmd + Wheel or two-finger trackpad pinch
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
       setZoom((prev) => prev * zoomFactor);
     } else {
-      // Regular two-finger scroll panning
       adjustPan(-e.deltaX / zoom, -e.deltaY / zoom);
     }
   };
@@ -143,12 +520,19 @@ export const WhiteboardCanvas: React.FC = () => {
   return (
     <div
       ref={containerRef}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       onWheel={handleWheel}
-      className={`relative h-full w-full overflow-hidden ${
-        isPanning ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
+      className={`relative h-full w-full overflow-hidden touch-none ${
+        isPanning
+          ? 'cursor-grab active:cursor-grabbing'
+          : activeTool === 'pen'
+            ? 'cursor-crosshair'
+            : activeTool === 'select'
+              ? 'cursor-default'
+              : 'cursor-crosshair'
       }`}
     >
       <canvas
@@ -157,7 +541,24 @@ export const WhiteboardCanvas: React.FC = () => {
         style={{ imageRendering: 'auto' }}
       />
 
-      {/* Floating Bottom-Right Zoom Percentage Control (positioned so it never overlaps PropertyBar) */}
+      {/* Author Attribution Hover Tooltip (Active when using Select tool) */}
+      {hoveredAuthor && (
+        <div
+          className="pointer-events-none absolute z-30 flex items-center gap-1.5 rounded-full border border-slate-700/80 bg-slate-900/90 px-2.5 py-1 text-xs font-medium text-slate-100 shadow-xl backdrop-blur-md transition-all duration-75 select-none"
+          style={{
+            left: `${hoveredAuthor.screenX + 16}px`,
+            top: `${hoveredAuthor.screenY - 12}px`,
+          }}
+        >
+          <div
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: hoveredAuthor.authorColor }}
+          />
+          <span>Drawn by {hoveredAuthor.authorName}</span>
+        </div>
+      )}
+
+      {/* Floating Bottom-Right Zoom Control (never overlaps PropertyBar) */}
       <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-xl border border-slate-700/80 bg-slate-900/95 px-2 py-1 shadow-xl backdrop-blur-xl select-none text-slate-200">
         <button
           onClick={() => setZoom((prev) => prev * 0.85)}

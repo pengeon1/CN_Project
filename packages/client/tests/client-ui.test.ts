@@ -28,6 +28,10 @@ describe('Client UI & Store Suite', () => {
       shareModalOpen: false,
       connectModalOpen: false,
       isDarkTheme: false,
+      objects: {},
+      liveLocalStroke: null,
+      remoteCursors: {},
+      lastAppliedSeq: 0,
     });
   });
 
@@ -154,5 +158,124 @@ describe('Client UI & Store Suite', () => {
     expect(state.participants).toHaveLength(0);
     expect(state.chatMessages).toHaveLength(2);
     expect(state.chatMessages[1]!.text).toContain('Bob left the session');
+  });
+
+  it('manages local stroke drawing lifecycle optimistically', () => {
+    const store = useWhiteboardStore.getState();
+    const myId = generateUuid();
+
+    // Set authenticated user
+    useWhiteboardStore.setState({
+      currentUser: { id: myId, username: 'Alice', color: '#18A0FB', role: Role.HOST },
+      roomInfo: { code: 'DRAW01', name: 'Board', isHost: true, locked: false },
+    });
+
+    // 1. Start drawing
+    store.startDrawing({ x: 50, y: 50, pressure: 0.5 });
+    let state = useWhiteboardStore.getState();
+    expect(state.liveLocalStroke).not.toBeNull();
+    expect(state.liveLocalStroke?.points).toHaveLength(1);
+    expect(state.liveLocalStroke?.isComplete).toBe(false);
+
+    // 2. Append points
+    store.updateLocalLivePoint({ x: 60, y: 60, pressure: 0.6 });
+    state = useWhiteboardStore.getState();
+    expect(state.liveLocalStroke?.points).toHaveLength(2);
+
+    // 3. Finish drawing
+    const strokeId = state.liveLocalStroke!.id;
+    store.finishDrawing({ x: 70, y: 70, pressure: 0.5 });
+
+    state = useWhiteboardStore.getState();
+    expect(state.liveLocalStroke).toBeNull();
+    expect(state.objects[strokeId]).toBeDefined();
+    expect((state.objects[strokeId] as { isComplete: boolean }).isComplete).toBe(true);
+    expect((state.objects[strokeId] as { points: unknown[] }).points).toHaveLength(3);
+  });
+
+  it('synchronizes incoming remote strokes and remote cursors', () => {
+    const store = useWhiteboardStore.getState();
+    const remoteUserId = generateUuid();
+    const strokeId = generateUuid();
+
+    useWhiteboardStore.setState({
+      participants: [
+        {
+          id: remoteUserId,
+          username: 'Charlie',
+          role: Role.EDITOR,
+          color: '#8B5CF6',
+          joinedAt: Date.now(),
+        },
+      ],
+    });
+
+    // Remote STROKE_BEGIN
+    store.handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.STROKE_BEGIN,
+        {
+          op_id: generateUuid(),
+          strokeId,
+          color: '#8B5CF6',
+          width: 4,
+          startPoint: { x: 200, y: 300 },
+        },
+        { room: 'ROOM1', user_id: remoteUserId, seq: 10 },
+      ),
+    );
+
+    let state = useWhiteboardStore.getState();
+    expect(state.objects[strokeId]).toBeDefined();
+    expect(state.objects[strokeId]?.authorId).toBe(remoteUserId);
+    expect(state.lastAppliedSeq).toBe(10);
+
+    // Remote STROKE_POINTS
+    store.handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.STROKE_POINTS,
+        {
+          op_id: generateUuid(),
+          strokeId,
+          points: [
+            { x: 210, y: 310 },
+            { x: 220, y: 320 },
+          ],
+        },
+        { room: 'ROOM1', user_id: remoteUserId, seq: 11 },
+      ),
+    );
+
+    state = useWhiteboardStore.getState();
+    const stroke = state.objects[strokeId] as { points: unknown[]; seq: number };
+    expect(stroke.points).toHaveLength(3);
+    expect(stroke.seq).toBe(11);
+
+    // Remote CURSOR_MOVE
+    store.handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.CURSOR_MOVE,
+        { x: 225, y: 325, activeTool: 'pen' },
+        { room: 'ROOM1', user_id: remoteUserId, seq: 0 },
+      ),
+    );
+
+    state = useWhiteboardStore.getState();
+    expect(state.remoteCursors[remoteUserId]).toBeDefined();
+    expect(state.remoteCursors[remoteUserId]?.username).toBe('Charlie');
+    expect(state.remoteCursors[remoteUserId]?.x).toBe(225);
+    expect(state.remoteCursors[remoteUserId]?.color).toBe('#8B5CF6');
+
+    // Remote participant leaves -> cursor is cleaned up
+    store.handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.PARTICIPANT_LEFT,
+        { userId: remoteUserId, username: 'Charlie' },
+        { room: 'ROOM1', user_id: remoteUserId },
+      ),
+    );
+
+    state = useWhiteboardStore.getState();
+    expect(state.remoteCursors[remoteUserId]).toBeUndefined();
   });
 });

@@ -42,4 +42,3 @@ export const ErrorPayloadSchema = z.object({
   message: z.string().min(1).max(1024),
   details: z.unknown().optional(),
 });
-

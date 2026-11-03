@@ -121,4 +121,3 @@ describe('Framing: Length-Prefixed Binary Protocol', () => {
     expect(decoder.getPendingBytes()).toBe(0);
   });
 });
-

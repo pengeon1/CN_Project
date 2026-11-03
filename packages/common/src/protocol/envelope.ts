@@ -81,4 +81,3 @@ export function isMessageEnvelope(data: unknown): data is MessageEnvelope {
     'payload' in candidate
   );
 }
-

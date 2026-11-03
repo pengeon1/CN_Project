@@ -158,4 +158,3 @@ export interface RoomSnapshot {
   locked: boolean;
   createdAt: number;
 }
-

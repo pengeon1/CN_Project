@@ -156,4 +156,3 @@ describe('Client UI & Store Suite', () => {
     expect(state.chatMessages[1]!.text).toContain('Bob left the session');
   });
 });
-

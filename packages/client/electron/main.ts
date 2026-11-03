@@ -17,6 +17,10 @@ import type { MessageEnvelope } from '@cn-whiteboard/common';
 import type { ConnectOptions } from '../src/types/ipc.js';
 import { MainTcpClient } from './tcp-client.js';
 
+// Optimize Chromium rasterization for crisp subpixel font rendering and high-DPI displays
+app.commandLine.appendSwitch('enable-font-antialiasing');
+app.commandLine.appendSwitch('high-dpi-support', '1');
+
 let mainWindow: BrowserWindow | null = null;
 let tcpClient: MainTcpClient | null = null;
 
@@ -48,6 +52,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 600,
     title: 'LAN Collaborative Whiteboard',
+    backgroundColor: '#0F172A',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

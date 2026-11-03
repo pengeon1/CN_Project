@@ -89,4 +89,3 @@ export const LeftToolbar: React.FC = () => {
     </aside>
   );
 };
-

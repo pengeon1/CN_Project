@@ -182,6 +182,40 @@ export class Room {
   }
 
   /**
+   * Erases specified whiteboard objects by ID.
+   * Ensures idempotency: if opId was already processed, returns existing state without incrementing seq.
+   */
+  public eraseObjects(opId: string, objectIds: string[]): { seq: number; erasedIds: string[] } {
+    if (this.hasProcessedOp(opId)) {
+      return { seq: this.seq, erasedIds: [] };
+    }
+    this.markOpProcessed(opId);
+    const erasedIds: string[] = [];
+    for (const id of objectIds) {
+      if (this.objects.has(id)) {
+        this.objects.delete(id);
+        erasedIds.push(id);
+      }
+    }
+    const seq = this.nextSeq();
+    return { seq, erasedIds };
+  }
+
+  /**
+   * Clears all objects from the whiteboard canvas.
+   * Ensures idempotency: if opId was already processed, returns existing seq without duplicate mutations.
+   */
+  public clearCanvas(opId: string): { seq: number } {
+    if (this.hasProcessedOp(opId)) {
+      return { seq: this.seq };
+    }
+    this.markOpProcessed(opId);
+    this.objects.clear();
+    const seq = this.nextSeq();
+    return { seq };
+  }
+
+  /**
    * Selects an accent color for a new participant from the predefined palette.
    */
   private pickColor(): string {

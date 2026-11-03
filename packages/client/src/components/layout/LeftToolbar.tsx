@@ -14,9 +14,11 @@ import {
   Pencil,
   Square,
   StickyNote,
+  Trash2,
   Type,
   Workflow,
 } from 'lucide-react';
+import { Role } from '@cn-whiteboard/common';
 import { type CanvasTool, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
 interface ToolItem {
@@ -37,7 +39,8 @@ const PRIMARY_TOOLS: ToolItem[] = [
 ];
 
 export const LeftToolbar: React.FC = () => {
-  const { activeTool, setActiveTool } = useWhiteboardStore();
+  const { activeTool, setActiveTool, currentUser, setClearModalOpen } = useWhiteboardStore();
+  const isHost = currentUser?.role === Role.HOST;
 
   return (
     <aside className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl select-none">
@@ -85,6 +88,21 @@ export const LeftToolbar: React.FC = () => {
         className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
       >
         <MoreHorizontal className="h-4 w-4" />
+      </button>
+
+      <div className="my-0.5 h-[1px] w-5 bg-slate-800" />
+
+      {/* Clear Canvas Action */}
+      <button
+        onClick={() => setClearModalOpen(true)}
+        title={isHost ? 'Clear Canvas (Host)' : 'Clear Canvas (Host only)'}
+        className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+          isHost
+            ? 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
+            : 'text-slate-600 hover:bg-slate-800/50 hover:text-slate-400 cursor-not-allowed'
+        }`}
+      >
+        <Trash2 className="h-4 w-4" />
       </button>
     </aside>
   );

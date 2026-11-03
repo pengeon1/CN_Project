@@ -13,6 +13,7 @@ import { RightPanel } from './components/layout/RightPanel.js';
 import { WhiteboardCanvas } from './components/canvas/WhiteboardCanvas.js';
 import { ConnectDialog } from './components/dialogs/ConnectDialog.js';
 import { ShareDialog } from './components/dialogs/ShareDialog.js';
+import { ClearCanvasDialog } from './components/dialogs/ClearCanvasDialog.js';
 
 export const App: React.FC = () => {
   const {
@@ -73,6 +74,7 @@ export const App: React.FC = () => {
       {/* Modals */}
       <ConnectDialog />
       <ShareDialog />
+      <ClearCanvasDialog />
     </div>
   );
 };

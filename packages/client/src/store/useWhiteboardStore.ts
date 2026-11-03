@@ -9,7 +9,10 @@ import { create } from 'zustand';
 import {
   canMutateCanvas,
   createEnvelope,
+  type CursorMovePayload,
+  type ErasePayload,
   generateUuid,
+  isHost,
   type MessageEnvelope,
   MessageType,
   type Participant,
@@ -24,7 +27,6 @@ import {
   type StrokeEndPayload,
   type StrokeObject,
   type StrokePointsPayload,
-  type CursorMovePayload,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
 import type { ConnectionStatus, ConnectOptions } from '../types/ipc.js';
@@ -86,6 +88,7 @@ export interface WhiteboardState {
   rightPanelTab: 'chat' | 'participants';
   shareModalOpen: boolean;
   connectModalOpen: boolean;
+  clearModalOpen: boolean;
   isDarkTheme: boolean;
 
   // Actions
@@ -100,6 +103,7 @@ export interface WhiteboardState {
   setRightPanelTab: (tab: 'chat' | 'participants') => void;
   setShareModalOpen: (open: boolean) => void;
   setConnectModalOpen: (open: boolean) => void;
+  setClearModalOpen: (open: boolean) => void;
   toggleTheme: () => void;
   sendChatMessage: (text: string) => void;
   connectToServer: (options: ConnectOptions) => Promise<boolean>;
@@ -112,6 +116,8 @@ export interface WhiteboardState {
   appendDrawingPoints: (points: Point[]) => void;
   finishDrawing: (finalPoint?: Point) => void;
   broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
+  eraseObjects: (objectIds: string[]) => void;
+  clearCanvas: () => void;
 }
 
 function getElectronAPI() {
@@ -157,6 +163,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   rightPanelTab: 'chat',
   shareModalOpen: false,
   connectModalOpen: false,
+  clearModalOpen: false,
   isDarkTheme: false,
 
   setConnectionStatus: (status, error = null) => {
@@ -206,6 +213,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   setConnectModalOpen: (open) => {
     set({ connectModalOpen: open });
+  },
+
+  setClearModalOpen: (open) => {
+    set({ clearModalOpen: open });
   },
 
   toggleTheme: () => {
@@ -440,6 +451,52 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     );
   },
 
+  eraseObjects: (objectIds) => {
+    if (objectIds.length === 0) return;
+    const { currentUser, roomInfo, objects } = get();
+    if (currentUser && !canMutateCanvas(currentUser.role)) return;
+    if (roomInfo?.locked && currentUser?.role !== Role.HOST) return;
+
+    // Optimistically remove from local state
+    const nextObjects = { ...objects };
+    for (const id of objectIds) {
+      delete nextObjects[id];
+    }
+    set({ objects: nextObjects });
+
+    const api = getElectronAPI();
+    if (api && roomInfo && currentUser) {
+      const op_id = generateUuid();
+      api.sendMessage(
+        createEnvelope(
+          MessageType.ERASE,
+          { op_id, objectIds },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
+
+  clearCanvas: () => {
+    const { currentUser, roomInfo } = get();
+    if (currentUser && !isHost(currentUser.role)) return;
+
+    // Optimistically clear local state
+    set({ objects: {}, liveLocalStroke: null, clearModalOpen: false });
+
+    const api = getElectronAPI();
+    if (api && roomInfo && currentUser) {
+      const op_id = generateUuid();
+      api.sendMessage(
+        createEnvelope(
+          MessageType.CLEAR_CANVAS,
+          { op_id },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
+
   handleIncomingEnvelope: (envelope) => {
     switch (envelope.type) {
       case MessageType.ROOM_STATE: {
@@ -661,6 +718,42 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           unreadChatCount:
             state.rightPanelOpen && state.rightPanelTab === 'chat' ? 0 : state.unreadChatCount + 1,
         }));
+        break;
+      }
+
+      case MessageType.ERASE: {
+        const payload = envelope.payload as ErasePayload;
+        set((state) => {
+          const nextObjects = { ...state.objects };
+          for (const id of payload.objectIds) {
+            delete nextObjects[id];
+          }
+          return {
+            objects: nextObjects,
+            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
+          };
+        });
+        break;
+      }
+
+      case MessageType.CLEAR_CANVAS: {
+        set((state) => {
+          const systemNotice: ChatEntry = {
+            id: generateUuid(),
+            userId: envelope.user_id,
+            username: 'System',
+            color: '#EF4444',
+            text: 'Whiteboard canvas was cleared by the room host.',
+            ts: Date.now(),
+            isSystem: true,
+          };
+          return {
+            objects: {},
+            liveLocalStroke: null,
+            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
+            chatMessages: [...state.chatMessages, systemNotice],
+          };
+        });
         break;
       }
     }

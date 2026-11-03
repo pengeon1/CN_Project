@@ -2,7 +2,8 @@
  * @fileoverview Main canvas viewport with razor-sharp dot-grid background,
  * high-DPI (Retina) scaling, panning, zooming, real-time freehand stroke rendering
  * using perfect-freehand, batched transmission, throttled cursor broadcasting,
- * remote live cursors with name tags, and author hover attribution.
+ * remote live cursors with name tags, stroke-level eraser with point-to-segment hit testing,
+ * and author hover attribution.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -24,6 +25,8 @@ interface HoveredAuthorInfo {
   screenX: number;
   screenY: number;
 }
+
+const ERASER_RADIUS = 16;
 
 /**
  * Renders a single freehand stroke onto the 2D canvas using perfect-freehand outline polygon.
@@ -141,18 +144,44 @@ function renderRemoteCursor(
 }
 
 /**
- * Calculates shortest distance from a world point (px, py) to a stroke's path points.
+ * Computes square of distance from point (px, py) to line segment (vx, vy) -> (wx, wy).
+ */
+function distToSegmentSquared(
+  px: number,
+  py: number,
+  vx: number,
+  vy: number,
+  wx: number,
+  wy: number,
+): number {
+  const l2 = (vx - wx) * (vx - wx) + (vy - wy) * (vy - wy);
+  if (l2 === 0) return (px - vx) * (px - vx) + (py - vy) * (py - vy);
+  let t = ((px - vx) * (wx - vx) + (py - vy) * (wy - vy)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = vx + t * (wx - vx);
+  const projY = vy + t * (wy - vy);
+  return (px - projX) * (px - projX) + (py - projY) * (py - projY);
+}
+
+/**
+ * Calculates shortest distance from a world point (px, py) to a stroke's path using segment tests.
  */
 function getDistanceToStroke(px: number, py: number, stroke: StrokeObject): number {
   if (stroke.points.length === 0) return Infinity;
-
-  let minDistanceSq = Infinity;
-  for (const pt of stroke.points) {
+  if (stroke.points.length === 1) {
+    const pt = stroke.points[0]!;
     const dx = px - pt.x;
     const dy = py - pt.y;
-    const distSq = dx * dx + dy * dy;
-    if (distSq < minDistanceSq) {
-      minDistanceSq = distSq;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  let minDistanceSq = Infinity;
+  for (let i = 0; i < stroke.points.length - 1; i++) {
+    const p1 = stroke.points[i]!;
+    const p2 = stroke.points[i + 1]!;
+    const dSq = distToSegmentSquared(px, py, p1.x, p1.y, p2.x, p2.y);
+    if (dSq < minDistanceSq) {
+      minDistanceSq = dSq;
     }
   }
 
@@ -179,6 +208,7 @@ export const WhiteboardCanvas: React.FC = () => {
     appendDrawingPoints,
     finishDrawing,
     broadcastCursorPosition,
+    eraseObjects,
   } = useWhiteboardStore();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -188,6 +218,19 @@ export const WhiteboardCanvas: React.FC = () => {
   const [isPanning, setIsPanning] = useState(false);
   const lastMousePos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const isSpacePressedRef = useRef(false);
+
+  // Drawing state
+  const isDrawingRef = useRef(false);
+  const isErasingRef = useRef(false);
+  const pendingPointsRef = useRef<Point[]>([]);
+  const lastBatchSendRef = useRef<number>(0);
+  const lastCursorSendRef = useRef<number>(0);
+
+  // Pointer position for eraser reticle rendering
+  const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Author attribution tooltip state
+  const [hoveredAuthor, setHoveredAuthor] = useState<HoveredAuthorInfo | null>(null);
 
   // Listen for space key to toggle pan cursor and interaction
   useEffect(() => {
@@ -209,15 +252,6 @@ export const WhiteboardCanvas: React.FC = () => {
     };
   }, []);
 
-  // Drawing state
-  const isDrawingRef = useRef(false);
-  const pendingPointsRef = useRef<Point[]>([]);
-  const lastBatchSendRef = useRef<number>(0);
-  const lastCursorSendRef = useRef<number>(0);
-
-  // Author attribution tooltip state
-  const [hoveredAuthor, setHoveredAuthor] = useState<HoveredAuthorInfo | null>(null);
-
   /**
    * Transforms screen (client) coordinates into whiteboard world coordinates.
    */
@@ -236,9 +270,33 @@ export const WhiteboardCanvas: React.FC = () => {
   );
 
   /**
+   * Performs hit detection and erases any strokes within ERASER_RADIUS.
+   */
+  const performEraseAt = useCallback(
+    (worldX: number, worldY: number) => {
+      const hitIds: string[] = [];
+      const threshold = ERASER_RADIUS;
+
+      for (const obj of Object.values(objects)) {
+        if (obj.type === 'stroke') {
+          const dist = getDistanceToStroke(worldX, worldY, obj);
+          if (dist <= threshold + obj.width / 2) {
+            hitIds.push(obj.id);
+          }
+        }
+      }
+
+      if (hitIds.length > 0) {
+        eraseObjects(hitIds);
+      }
+    },
+    [objects, eraseObjects],
+  );
+
+  /**
    * Razor-sharp high-DPI canvas rendering routine.
    * Renders dot grid, committed strokes, live optimistic local stroke,
-   * selection highlights, and remote user cursors.
+   * selection highlights, remote user cursors, and eraser reticle.
    */
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -330,6 +388,20 @@ export const WhiteboardCanvas: React.FC = () => {
         renderRemoteCursor(ctx, cursor, sx, sy);
       }
     }
+
+    // 5. Render eraser reticle indicator when eraser tool is active
+    if (activeTool === 'eraser' && eraserPos) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(eraserPos.x, eraserPos.y, ERASER_RADIUS * zoom, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.restore();
+    }
   }, [
     zoom,
     panX,
@@ -339,6 +411,8 @@ export const WhiteboardCanvas: React.FC = () => {
     liveLocalStroke,
     remoteCursors,
     hoveredAuthor?.strokeId,
+    activeTool,
+    eraserPos,
   ]);
 
   // Continuously request animation frame when rendering changes
@@ -383,6 +457,17 @@ export const WhiteboardCanvas: React.FC = () => {
       startDrawing(startPoint);
       containerRef.current?.setPointerCapture(e.pointerId);
       e.preventDefault();
+      return;
+    }
+
+    // Eraser tool deletes strokes on click / drag
+    if (e.button === 0 && activeTool === 'eraser') {
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      isErasingRef.current = true;
+      performEraseAt(x, y);
+      containerRef.current?.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
     }
   };
 
@@ -397,6 +482,21 @@ export const WhiteboardCanvas: React.FC = () => {
       adjustPan(dx, dy);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       return;
+    }
+
+    // Track eraser reticle position in screen coordinates
+    if (activeTool === 'eraser') {
+      const container = containerRef.current;
+      const rect = container?.getBoundingClientRect();
+      const sx = e.clientX - (rect?.left || 0);
+      const sy = e.clientY - (rect?.top || 0);
+      setEraserPos({ x: sx, y: sy });
+
+      if (isErasingRef.current) {
+        performEraseAt(x, y);
+      }
+    } else if (eraserPos) {
+      setEraserPos(null);
     }
 
     // Active Drawing
@@ -472,6 +572,15 @@ export const WhiteboardCanvas: React.FC = () => {
       setIsPanning(false);
     }
 
+    if (isErasingRef.current) {
+      isErasingRef.current = false;
+      try {
+        containerRef.current?.releasePointerCapture(e.pointerId);
+      } catch {
+        // Pointer capture may have already been released
+      }
+    }
+
     if (isDrawingRef.current && activeTool === 'pen') {
       isDrawingRef.current = false;
       const { x, y } = screenToWorld(e.clientX, e.clientY);
@@ -493,6 +602,13 @@ export const WhiteboardCanvas: React.FC = () => {
     }
   };
 
+  const handlePointerLeave = () => {
+    setEraserPos(null);
+    if (hoveredAuthor) {
+      setHoveredAuthor(null);
+    }
+  };
+
   const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isDrawingRef.current) {
       isDrawingRef.current = false;
@@ -503,6 +619,7 @@ export const WhiteboardCanvas: React.FC = () => {
         // Ignore
       }
     }
+    isErasingRef.current = false;
     setIsPanning(false);
   };
 
@@ -523,6 +640,7 @@ export const WhiteboardCanvas: React.FC = () => {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
       onPointerCancel={handlePointerCancel}
       onWheel={handleWheel}
       className={`relative h-full w-full overflow-hidden touch-none ${
@@ -530,9 +648,11 @@ export const WhiteboardCanvas: React.FC = () => {
           ? 'cursor-grab active:cursor-grabbing'
           : activeTool === 'pen'
             ? 'cursor-crosshair'
-            : activeTool === 'select'
-              ? 'cursor-default'
-              : 'cursor-crosshair'
+            : activeTool === 'eraser'
+              ? 'cursor-none'
+              : activeTool === 'select'
+                ? 'cursor-default'
+                : 'cursor-crosshair'
       }`}
     >
       <canvas

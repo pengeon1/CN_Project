@@ -278,4 +278,134 @@ describe('Client UI & Store Suite', () => {
     state = useWhiteboardStore.getState();
     expect(state.remoteCursors[remoteUserId]).toBeUndefined();
   });
+
+  it('erases objects locally and applies incoming ERASE network envelopes', () => {
+    const store = useWhiteboardStore.getState();
+    const strokeId1 = generateUuid();
+    const strokeId2 = generateUuid();
+
+    // Populate objects
+    useWhiteboardStore.setState({
+      currentUser: { id: 'u1', username: 'Alice', color: '#10B981', role: Role.EDITOR },
+      roomInfo: { code: 'ERAS01', name: 'Board', isHost: false, locked: false },
+      objects: {
+        [strokeId1]: {
+          id: strokeId1,
+          authorId: 'u1',
+          seq: 1,
+          zIndex: 1,
+          updatedAt: Date.now(),
+          type: 'stroke',
+          color: '#10B981',
+          width: 3,
+          points: [{ x: 10, y: 10 }],
+          isComplete: true,
+        },
+        [strokeId2]: {
+          id: strokeId2,
+          authorId: 'u2',
+          seq: 2,
+          zIndex: 2,
+          updatedAt: Date.now(),
+          type: 'stroke',
+          color: '#3B82F6',
+          width: 3,
+          points: [{ x: 20, y: 20 }],
+          isComplete: true,
+        },
+      },
+    });
+
+    // 1. Local erase
+    store.eraseObjects([strokeId1]);
+    let state = useWhiteboardStore.getState();
+    expect(state.objects[strokeId1]).toBeUndefined();
+    expect(state.objects[strokeId2]).toBeDefined();
+
+    // 2. Incoming remote ERASE
+    store.handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.ERASE,
+        { op_id: generateUuid(), objectIds: [strokeId2] },
+        { room: 'ERAS01', user_id: 'u2', seq: 15 },
+      ),
+    );
+
+    state = useWhiteboardStore.getState();
+    expect(state.objects[strokeId2]).toBeUndefined();
+    expect(state.lastAppliedSeq).toBe(15);
+  });
+
+  it('restricts clearCanvas to HOST and synchronizes CLEAR_CANVAS envelope', () => {
+    const store = useWhiteboardStore.getState();
+    const strokeId = generateUuid();
+
+    // Non-host attempts clearCanvas
+    useWhiteboardStore.setState({
+      currentUser: { id: 'u2', username: 'Bob', color: '#3B82F6', role: Role.EDITOR },
+      roomInfo: { code: 'CLR01', name: 'Board', isHost: false, locked: false },
+      objects: {
+        [strokeId]: {
+          id: strokeId,
+          authorId: 'u1',
+          seq: 1,
+          zIndex: 1,
+          updatedAt: Date.now(),
+          type: 'stroke',
+          color: '#10B981',
+          width: 3,
+          points: [{ x: 10, y: 10 }],
+          isComplete: true,
+        },
+      },
+    });
+
+    store.clearCanvas();
+    let state = useWhiteboardStore.getState();
+    // Non-host cannot clear
+    expect(state.objects[strokeId]).toBeDefined();
+
+    // Promoted to HOST -> clears canvas
+    useWhiteboardStore.setState({
+      currentUser: { id: 'u1', username: 'Alice', color: '#10B981', role: Role.HOST },
+      roomInfo: { code: 'CLR01', name: 'Board', isHost: true, locked: false },
+    });
+
+    store.clearCanvas();
+    state = useWhiteboardStore.getState();
+    expect(state.objects).toEqual({});
+
+    // Incoming CLEAR_CANVAS adds system notice and clears state
+    useWhiteboardStore.setState({
+      objects: {
+        [strokeId]: {
+          id: strokeId,
+          authorId: 'u1',
+          seq: 1,
+          zIndex: 1,
+          updatedAt: Date.now(),
+          type: 'stroke',
+          color: '#10B981',
+          width: 3,
+          points: [{ x: 10, y: 10 }],
+          isComplete: true,
+        },
+      },
+    });
+
+    store.handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.CLEAR_CANVAS,
+        { op_id: generateUuid() },
+        { room: 'CLR01', user_id: 'host-id', seq: 20 },
+      ),
+    );
+
+    state = useWhiteboardStore.getState();
+    expect(state.objects).toEqual({});
+    expect(state.lastAppliedSeq).toBe(20);
+    expect(state.chatMessages[state.chatMessages.length - 1]!.text).toContain(
+      'cleared by the room host',
+    );
+  });
 });

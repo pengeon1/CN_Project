@@ -8,11 +8,14 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import {
   canMutateCanvas,
+  type ClearCanvasPayload,
   createEnvelope,
   type CursorMovePayload,
+  type ErasePayload,
   generateUuid,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
+  isHost,
   type MessageEnvelope,
   MessageType,
   PROTOCOL_VERSION,
@@ -389,6 +392,96 @@ export class WhiteboardServer {
             room.broadcast(cursorEnvelope, session.userId);
           }
         }
+        break;
+      }
+
+      case MessageType.ERASE: {
+        if (!session.roomCode) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'NOT_IN_ROOM', message: 'You must join a room first' },
+              { user_id: session.userId },
+            ),
+          );
+          return;
+        }
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room) return;
+
+        if (!canMutateCanvas(session.role)) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'FORBIDDEN', message: 'Viewer role cannot erase objects' },
+              { room: room.code, user_id: session.userId },
+            ),
+          );
+          return;
+        }
+
+        const payload = validatePayload<ErasePayload>(MessageType.ERASE, envelope.payload);
+
+        await room.enqueue(async () => {
+          const { seq } = room.eraseObjects(payload.op_id, payload.objectIds);
+          const broadcastEnvelope = createEnvelope(
+            MessageType.ERASE,
+            { op_id: payload.op_id, objectIds: payload.objectIds },
+            {
+              msg_id: envelope.msg_id,
+              seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: Date.now(),
+            },
+          );
+          room.broadcast(broadcastEnvelope);
+        });
+        break;
+      }
+
+      case MessageType.CLEAR_CANVAS: {
+        if (!session.roomCode) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'NOT_IN_ROOM', message: 'You must join a room first' },
+              { user_id: session.userId },
+            ),
+          );
+          return;
+        }
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room) return;
+
+        // ONLY HOST can clear the canvas!
+        if (!isHost(session.role)) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'FORBIDDEN', message: 'Only the room host can clear the canvas' },
+              { room: room.code, user_id: session.userId },
+            ),
+          );
+          return;
+        }
+
+        const payload = validatePayload<ClearCanvasPayload>(
+          MessageType.CLEAR_CANVAS,
+          envelope.payload,
+        );
+
+        await room.enqueue(async () => {
+          const { seq } = room.clearCanvas(payload.op_id);
+          const broadcastEnvelope = createEnvelope(MessageType.CLEAR_CANVAS, payload, {
+            msg_id: envelope.msg_id,
+            seq,
+            room: room.code,
+            user_id: session.userId,
+            ts: Date.now(),
+          });
+          room.broadcast(broadcastEnvelope);
+        });
         break;
       }
 

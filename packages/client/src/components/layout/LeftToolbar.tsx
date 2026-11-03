@@ -40,7 +40,7 @@ export const LeftToolbar: React.FC = () => {
   const { activeTool, setActiveTool } = useWhiteboardStore();
 
   return (
-    <aside className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1.5 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-2 shadow-2xl backdrop-blur-xl select-none">
+    <aside className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl select-none">
       {PRIMARY_TOOLS.map((tool) => {
         const Icon = tool.icon;
         const isActive = activeTool === tool.id;
@@ -50,7 +50,7 @@ export const LeftToolbar: React.FC = () => {
             key={tool.id}
             onClick={() => setActiveTool(tool.id)}
             title={tool.label}
-            className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${
+            className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition ${
               isActive
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
                 : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
@@ -61,12 +61,12 @@ export const LeftToolbar: React.FC = () => {
         );
       })}
 
-      <div className="my-0.5 h-[1px] w-6 bg-slate-800" />
+      <div className="my-0.5 h-[1px] w-5 bg-slate-800" />
 
       {/* Image Insertion Placeholder */}
       <button
         title="Insert Image"
-        className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
       >
         <ImageIcon className="h-4 w-4" />
       </button>
@@ -74,7 +74,7 @@ export const LeftToolbar: React.FC = () => {
       {/* Connector Tool */}
       <button
         title="Connector"
-        className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
       >
         <Workflow className="h-4 w-4" />
       </button>
@@ -82,7 +82,7 @@ export const LeftToolbar: React.FC = () => {
       {/* More / Overflow Menu */}
       <button
         title="More Tools"
-        className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
       >
         <MoreHorizontal className="h-4 w-4" />
       </button>

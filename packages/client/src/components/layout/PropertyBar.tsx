@@ -48,7 +48,7 @@ export const PropertyBar: React.FC = () => {
   const isShape = activeTool === 'rectangle' || activeTool === 'ellipse';
 
   return (
-    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 rounded-2xl border border-slate-700/80 bg-slate-900/95 px-4 py-2 shadow-2xl backdrop-blur-xl select-none">
+    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex max-w-[calc(100%-260px)] items-center gap-2.5 rounded-xl border border-slate-700/80 bg-slate-900/95 px-3.5 py-1.5 shadow-xl backdrop-blur-xl select-none overflow-x-auto">
       {/* Color Swatches */}
       <div className="flex items-center gap-1.5">
         {PALETTE_SWATCHES.map((color) => {

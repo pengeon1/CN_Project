@@ -37,4 +37,3 @@ export function canMutateCanvas(role: Role): boolean {
 export function isHost(role: Role): boolean {
   return role === Role.HOST;
 }
-

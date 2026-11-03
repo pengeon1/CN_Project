@@ -89,4 +89,3 @@ describe('Zod Schema Validation & Envelope Utilities', () => {
     expect(() => validatePayload(MessageType.CHAT_MESSAGE, { text: '' })).toThrow();
   });
 });
-

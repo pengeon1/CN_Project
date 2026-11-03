@@ -20,4 +20,3 @@ export const MessageEnvelopeSchema = z.object({
 });
 
 export type ValidatedEnvelope = z.infer<typeof MessageEnvelopeSchema>;
-

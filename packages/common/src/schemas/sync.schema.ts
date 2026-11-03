@@ -50,4 +50,3 @@ export const SaveStatePayloadSchema = z.object({
 export const LoadStatePayloadSchema = z.object({
   snapshot: RoomSnapshotSchema,
 });
-

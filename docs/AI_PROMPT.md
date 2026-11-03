@@ -1,14 +1,18 @@
 # ROLE
+
 You are a senior engineer building a university Computer Networks lab project with a team of students. Work in small, reviewable phases. Do ONE phase at a time, then stop, summarize what you did, show how to run/test it, and wait for my "continue" before starting the next phase.
 
 # ATTACHED FILES
+
 1. CN_Lab_Project_Instructions.pdf - the official assignment. Treat every requirement in it as mandatory. Re-read it before each phase.
 2. image.png - the target UI/design reference (a modern whiteboard app in the style of Figma/FigJam).
 
 # PROJECT SUMMARY
+
 Build a LAN-based, multi-user, real-time collaborative whiteboard with a central server and multiple clients. All essential communication must use TCP socket programming (no WebSocket libraries, no HTTP frameworks, no Socket.IO, no Firebase, no cloud services). It must work with the internet fully disabled. It must be cross-platform (Windows, Linux, macOS) and ship as standalone executables for both server and client.
 
 # TECH STACK (fixed; do not substitute without asking me first)
+
 - Language: TypeScript (strict mode) everywhere.
 - Monorepo: npm workspaces with three packages: `packages/common`, `packages/server`, `packages/client`.
 - Server: Node.js 20+ using the built-in `net` module (raw TCP) and `dgram` (UDP discovery). No networking frameworks. Bundle with esbuild and package into a standalone executable with `@yao-pkg/pkg` (targets: win-x64, linux-x64, macos-arm64 and macos-x64).
@@ -22,23 +26,26 @@ Build a LAN-based, multi-user, real-time collaborative whiteboard with a central
 - CI/CD: GitHub Actions with an OS matrix (windows-latest, ubuntu-latest, macos-latest) running lint, tests and builds, uploading executables as artifacts, and a release workflow triggered by tags.
 
 # REPOSITORY
+
 Remote: https://github.com/pengeon1/CN_Project
+
 - The default and primary branch MUST be named `main` (not master). If the local repo uses another name, run `git branch -M main` and push with `-u origin main`. Set `init.defaultBranch main` in the setup instructions.
 - If the repo is empty, initialize it. If you cannot push, give me the exact git commands to run.
 - Layout:
-    README.md, LICENSE, package.json (workspaces), tsconfig.base.json, .gitignore, .editorconfig, CONTRIBUTING.md
-    packages/common/src   (protocol, framing, message types, schemas, constants, models)
-    packages/server/src   (sessions, rooms, state, broadcast, persistence, auth, discovery)
-    packages/client/electron   (main process: TCP connection manager, preload, IPC)
-    packages/client/src   (renderer: components/, canvas/, tools/, store/, hooks/, styles/)
-    tests/                (cross-package integration tests, lossy-network harness)
-    docs/                 (architecture.md, protocol.md, user_guide.md, diagrams/, reference/, AI_PROMPT.md)
-    scripts/              (build and helper scripts)
-    .github/workflows/    (ci.yml, release.yml)
+  README.md, LICENSE, package.json (workspaces), tsconfig.base.json, .gitignore, .editorconfig, CONTRIBUTING.md
+  packages/common/src (protocol, framing, message types, schemas, constants, models)
+  packages/server/src (sessions, rooms, state, broadcast, persistence, auth, discovery)
+  packages/client/electron (main process: TCP connection manager, preload, IPC)
+  packages/client/src (renderer: components/, canvas/, tools/, store/, hooks/, styles/)
+  tests/ (cross-package integration tests, lossy-network harness)
+  docs/ (architecture.md, protocol.md, user_guide.md, diagrams/, reference/, AI_PROMPT.md)
+  scripts/ (build and helper scripts)
+  .github/workflows/ (ci.yml, release.yml)
 - Git workflow: `main` is protected in spirit: it must always build and run. Phases 0-3 may be committed on `main` after my approval; from Phase 4 onward every phase is developed on its own branch `feature/<NN>-<name>`, with small clear commits (Conventional Commits style: feat:, fix:, docs:, test:, chore:), then I open a PR into `main` and merge manually. Never force-push `main`. Each phase branch must start from the latest `main`. Document all of this in CONTRIBUTING.md, including how teammates rebase/merge, PR checklist (tests pass, docs updated, no console errors), and the branch naming rules.
 - Keep modules small and well commented (the assignment requires commented source). Add TSDoc comments to every exported type and function, and write comments that explain WHY, not just what.
 
 # UI DESIGN (follow the attached image closely)
+
 - Top bar: back/leave button, session title with "last saved" text, a stack of participant avatars (colored circles with initials, unique color per user), a find button, a chat toggle with an unread badge, and a prominent blue "Share" button that shows the server LAN IP, port, room code and copy buttons.
 - Left floating dark vertical toolbar: select, pen, eraser, shapes, text, image, sticky note, line/arrow, connector, and an overflow menu.
 - Center: canvas with a subtle dot-grid background, pan (space+drag or middle mouse) and zoom (ctrl+wheel / pinch), with a zoom percentage control at the bottom right (- / 62% / +).
@@ -49,24 +56,26 @@ Remote: https://github.com/pengeon1/CN_Project
 - Smooth rendering: use requestAnimationFrame, redraw only dirty regions or layers (static committed layer + live layer), and handle devicePixelRatio.
 
 # PROTOCOL (design in Phase 1, document in docs/protocol.md)
+
 Transport: TCP. Justify why (reliable ordered byte stream, no need to reinvent retransmission, simpler consistency than UDP) and explain what must still be handled at the application layer.
 Framing: 4-byte big-endian unsigned length prefix + UTF-8 JSON body. Enforce a max frame size (e.g. 8 MB; images are sent in chunks) and reject oversize or malformed frames. The decoder must handle partial reads and multiple frames per chunk.
 Envelope for every message:
-    { "v": 1, "type": "<MESSAGE_TYPE>", "msg_id": "<uuid>", "seq": <int, server-assigned for sequenced ops>, "ts": <server epoch ms>, "room": "<room code>", "user_id": "<uuid>", "payload": { ... } }
+{ "v": 1, "type": "<MESSAGE_TYPE>", "msg_id": "<uuid>", "seq": <int, server-assigned for sequenced ops>, "ts": <server epoch ms>, "room": "<room code>", "user_id": "<uuid>", "payload": { ... } }
 Message types (at minimum): HELLO, AUTH_OK, AUTH_FAIL, CREATE_ROOM, JOIN_ROOM, LEAVE_ROOM, ROOM_STATE (full snapshot + latest seq), PARTICIPANT_JOINED, PARTICIPANT_LEFT, PARTICIPANT_LIST, STROKE_BEGIN, STROKE_POINTS (batched), STROKE_END, SHAPE_ADD, OBJECT_UPDATE, OBJECT_DELETE, ERASE (by object id), CLEAR_CANVAS, UNDO, REDO, CURSOR_MOVE (throttled, not persisted), CHAT_MESSAGE, CHAT_HISTORY, PING, PONG, ACK, RESYNC_REQUEST, RESYNC_RESPONSE, SAVE_STATE, LOAD_STATE, ERROR, PERMISSION_CHANGE.
 Ordering and reliability (document precisely):
+
 - The server is the single source of truth and assigns a monotonically increasing `seq` per room to every accepted operation. Clients apply operations strictly in `seq` order.
 - Each client op carries a client-generated `op_id`. The server de-duplicates by op_id (idempotent), so retries and duplicates are harmless.
 - Clients render their own strokes optimistically, then reconcile when the server echoes the op with its seq.
 - If a client detects a gap in seq, it sends RESYNC_REQUEST with its last applied seq; the server replies with the missing ops, or a full snapshot if the gap is too large.
 - Out-of-order ops are buffered briefly, then trigger a resync.
 - Stroke points are batched (every ~16-33 ms) to cut traffic. Cursor moves are throttled and never persisted.
-Undo/redo semantics (define clearly and document):
+  Undo/redo semantics (define clearly and document):
 - Each user has their own undo/redo stack with only their own operations. Undo creates a new compensating UNDO operation referencing the target op_id, which is sequenced and broadcast so all clients converge. Undo never removes another user's work. If the target was already deleted or cleared by someone else, undo is a no-op and the user is told. A new operation by a user clears that user's redo stack.
-Connection management:
+  Connection management:
 - PING/PONG heartbeat every 5 s; the server drops a client after 15 s of silence and broadcasts PARTICIPANT_LEFT; the room stays alive.
 - Reconnect: the client keeps a session token; on reconnect it re-authenticates, sends its last seq, and gets missing ops or a full snapshot, then resumes. Auto-reconnect with exponential backoff and a visible "reconnecting..." banner.
-Security / access control:
+  Security / access control:
 - Room code (6 chars, unambiguous alphabet) + optional room password. Store only a salted hash (Node `crypto.scrypt`). Rate-limit failed attempts per IP.
 - Roles: HOST, EDITOR, VIEWER. The server validates every operation against the sender's role. Viewers cannot mutate. Only HOST can clear the canvas, kick users, change roles, and lock the room. The server never trusts the client: validate every message with zod (schema, ranges, sizes, point counts).
 
@@ -127,15 +136,14 @@ PHASE 17 - Documentation (branch: feature/17-docs)
 docs/ technical documentation covering system architecture, application-level message format, socket communication, synchronization strategy, concurrency handling and recovery, plus a User Guide (configuring the server, connecting clients over the LAN, creating/joining sessions, using each tool). Include Mermaid diagrams (architecture, sequence diagrams for join, draw, reconnect). Also produce an outline for the PPT with a slide-by-slide plan and a list of screenshots to capture.
 
 # CONCURRENCY RULES (server)
+
 - Node's single-threaded event loop: process ops per room through a serial queue so they are sequenced one at a time; no shared mutable state mutated outside that queue.
 - Never block the loop; use async fs APIs for disk writes and debounce autosave.
 - A slow client must not stall others: give each client a bounded outgoing queue and respect socket backpressure (`write()` return value and the 'drain' event). On overflow drop cursor events first; if still full, disconnect the client and let it resync.
 
 # QUALITY RULES
+
 - Each phase must include tests and updated docs and leave `main`-compatible, runnable code.
 - Do not add features out of order. Do not refactor unrelated code during a phase.
 - After each phase give me: (1) what changed, (2) how to run it, (3) how to test it, (4) known limitations, (5) the exact git commands to commit, push, and open a PR into `main`.
 - If any requirement in the PDF is ambiguous, ask me before assuming.
-
-# START
-Begin with PHASE 0 only. Before writing code, show me a short plan (file tree + key decisions) and wait for my approval.

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-electron/
+**/dist/**
+**/dist-electron/**
+build/
+release/
+out/
+coverage/
+package-lock.json
+*.png
+*.pdf
+

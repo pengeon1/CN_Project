@@ -8,6 +8,8 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import {
   canMutateCanvas,
+  type ChatMessage,
+  type ChatMessagePayload,
   type ClearCanvasPayload,
   createEnvelope,
   type CursorMovePayload,
@@ -19,6 +21,7 @@ import {
   type MessageEnvelope,
   MessageType,
   PROTOCOL_VERSION,
+  type ResyncRequestPayload,
   type StrokeBeginPayload,
   type StrokeEndPayload,
   type StrokePointsPayload,
@@ -423,7 +426,7 @@ export class WhiteboardServer {
         const payload = validatePayload<ErasePayload>(MessageType.ERASE, envelope.payload);
 
         await room.enqueue(async () => {
-          const { seq } = room.eraseObjects(payload.op_id, payload.objectIds);
+          const { seq } = room.eraseObjects(payload.op_id, payload.objectIds, session.userId);
           const broadcastEnvelope = createEnvelope(
             MessageType.ERASE,
             { op_id: payload.op_id, objectIds: payload.objectIds },
@@ -472,7 +475,7 @@ export class WhiteboardServer {
         );
 
         await room.enqueue(async () => {
-          const { seq } = room.clearCanvas(payload.op_id);
+          const { seq } = room.clearCanvas(payload.op_id, session.userId);
           const broadcastEnvelope = createEnvelope(MessageType.CLEAR_CANVAS, payload, {
             msg_id: envelope.msg_id,
             seq,
@@ -482,6 +485,134 @@ export class WhiteboardServer {
           });
           room.broadcast(broadcastEnvelope);
         });
+        break;
+      }
+
+      case MessageType.RESYNC_REQUEST: {
+        if (!session.roomCode) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'NOT_IN_ROOM', message: 'You must join a room first to request resync' },
+              { user_id: session.userId },
+            ),
+          );
+          return;
+        }
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room) return;
+
+        const payload = validatePayload<ResyncRequestPayload>(
+          MessageType.RESYNC_REQUEST,
+          envelope.payload,
+        );
+
+        await room.enqueue(async () => {
+          const resyncData = room.getResyncData(payload.last_seq);
+          session.send(
+            createEnvelope(MessageType.RESYNC_RESPONSE, resyncData, {
+              msg_id: generateUuid(),
+              room: room.code,
+              user_id: session.userId,
+              seq: room.seq,
+            }),
+          );
+        });
+        break;
+      }
+
+      case MessageType.CHAT_MESSAGE: {
+        if (!session.roomCode) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              { code: 'NOT_IN_ROOM', message: 'You must join a room first to send chat messages' },
+              { user_id: session.userId },
+            ),
+          );
+          return;
+        }
+
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room) return;
+
+        const payload = validatePayload<ChatMessagePayload>(
+          MessageType.CHAT_MESSAGE,
+          envelope.payload,
+        );
+
+        await room.enqueue(async () => {
+          const chatMsgId = payload.id || generateUuid();
+          const chatTs = Date.now();
+          const seq = room.nextSeq();
+
+          const messageRecord: ChatMessage = {
+            id: chatMsgId,
+            userId: session.userId,
+            username: session.username || payload.username || 'User',
+            color: session.color || payload.color || '#3B82F6',
+            text: payload.text,
+            ts: chatTs,
+            isSystem: payload.isSystem ?? false,
+          };
+
+          room.recordChatMessage(messageRecord);
+
+          const broadcastEnvelope = createEnvelope(
+            MessageType.CHAT_MESSAGE,
+            {
+              id: messageRecord.id,
+              text: messageRecord.text,
+              username: messageRecord.username,
+              color: messageRecord.color,
+              ts: messageRecord.ts,
+              isSystem: messageRecord.isSystem,
+            },
+            {
+              msg_id: envelope.msg_id,
+              seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: chatTs,
+            },
+          );
+
+          room.broadcast(broadcastEnvelope);
+        });
+        break;
+      }
+
+      case MessageType.CHAT_HISTORY: {
+        if (!session.roomCode) {
+          session.send(
+            createEnvelope(
+              MessageType.ERROR,
+              {
+                code: 'NOT_IN_ROOM',
+                message: 'You must join a room first to request chat history',
+              },
+              { user_id: session.userId },
+            ),
+          );
+          return;
+        }
+
+        const room = this.roomManager.getRoom(session.roomCode);
+        if (!room) return;
+
+        session.send(
+          createEnvelope(
+            MessageType.CHAT_HISTORY,
+            { messages: room.getChatHistory() },
+            {
+              msg_id: generateUuid(),
+              room: room.code,
+              user_id: session.userId,
+              seq: room.seq,
+              ts: Date.now(),
+            },
+          ),
+        );
         break;
       }
 

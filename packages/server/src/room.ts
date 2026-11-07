@@ -4,14 +4,22 @@
  */
 
 import {
+  type ChatMessage,
+  COMPACT_RETAIN_OPS,
   createEnvelope,
+  generateUuid,
+  MAX_CHAT_HISTORY_SIZE,
+  MAX_OPS_LOG_SIZE,
+  MAX_RESYNC_OPS_WINDOW,
   type MessageEnvelope,
   MessageType,
   type Participant,
   PARTICIPANT_COLORS,
   type Point,
+  type ResyncResponsePayload,
   Role,
   type RoomSnapshot,
+  type SequencedOperation,
   type StrokeObject,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
@@ -39,6 +47,28 @@ export class Room {
    */
   public seq: number = 0;
 
+  /**
+   * Sequence number up to which operations have been trimmed/compacted.
+   */
+  public baseSeq: number = 0;
+
+  /**
+   * Maximum operations allowed in the log before auto-compaction triggers.
+   */
+  public maxOpsLogSize: number = MAX_OPS_LOG_SIZE;
+
+  /**
+   * Number of recent operations retained when compaction is triggered.
+   */
+  public compactRetainOps: number = COMPACT_RETAIN_OPS;
+
+  /**
+   * Maximum messages retained in the chronological chat history log.
+   */
+  public maxChatHistorySize: number = MAX_CHAT_HISTORY_SIZE;
+
+  private operationsLog: SequencedOperation[] = [];
+  private chatHistory: ChatMessage[] = [];
   private participants: Map<string, RoomParticipantEntry> = new Map();
   private objects: Map<string, WhiteboardObject> = new Map();
   private processedOpIds: Set<string> = new Set();
@@ -53,6 +83,95 @@ export class Room {
     this.passwordHash = passwordHash ?? null;
     this.createdAt = Date.now();
     this.logger = new Logger(`Room ${code}`);
+  }
+
+  /**
+   * The lowest sequence number currently retained in the ordered operations log.
+   */
+  public get oldestSeq(): number {
+    if (this.operationsLog.length > 0) {
+      return this.operationsLog[0]!.seq;
+    }
+    return this.baseSeq;
+  }
+
+  /**
+   * Returns the count of operations currently retained in the log.
+   */
+  public get operationsCount(): number {
+    return this.operationsLog.length;
+  }
+
+  /**
+   * Appends an accepted mutating operation to the ordered operations log.
+   * Triggers compaction if the log exceeds maxOpsLogSize.
+   */
+  public recordOperation(op: SequencedOperation): void {
+    this.operationsLog.push(op);
+    if (this.operationsLog.length > this.maxOpsLogSize) {
+      this.compactLog();
+    }
+  }
+
+  /**
+   * Compacts the operations log by pruning older operations, retaining only `retainCount` recent ops.
+   * Materialized whiteboard state is unaffected since `this.objects` already reflects all applied ops.
+   */
+  public compactLog(retainCount: number = this.compactRetainOps): {
+    prunedCount: number;
+    remainingCount: number;
+  } {
+    if (this.operationsLog.length <= retainCount) {
+      return { prunedCount: 0, remainingCount: this.operationsLog.length };
+    }
+
+    const pruneCount = this.operationsLog.length - retainCount;
+    const pruned = this.operationsLog.splice(0, pruneCount);
+    const lastPruned = pruned[pruned.length - 1];
+    if (lastPruned) {
+      this.baseSeq = lastPruned.seq;
+    }
+
+    this.logger.debug(
+      `Compacted ops log for room ${this.code}: pruned ${pruned.length} ops. Oldest retained seq: ${this.oldestSeq}, baseSeq: ${this.baseSeq}`,
+    );
+
+    return { prunedCount: pruned.length, remainingCount: this.operationsLog.length };
+  }
+
+  /**
+   * Appends an accepted chat message to the room's chronological history.
+   * Enforces maxChatHistorySize bounded queue.
+   */
+  public recordChatMessage(message: ChatMessage): void {
+    this.chatHistory.push(message);
+    if (this.chatHistory.length > this.maxChatHistorySize) {
+      this.chatHistory.splice(0, this.chatHistory.length - this.maxChatHistorySize);
+    }
+  }
+
+  /**
+   * Records an automated system notification (e.g. participant joined or left).
+   */
+  public recordSystemMessage(text: string): ChatMessage {
+    const systemMsg: ChatMessage = {
+      id: generateUuid(),
+      userId: '00000000-0000-0000-0000-000000000000',
+      username: 'System',
+      color: '#64748B',
+      text,
+      ts: Date.now(),
+      isSystem: true,
+    };
+    this.recordChatMessage(systemMsg);
+    return systemMsg;
+  }
+
+  /**
+   * Returns a copy of the chronological chat history retained in the room.
+   */
+  public getChatHistory(): ChatMessage[] {
+    return [...this.chatHistory];
   }
 
   /**
@@ -100,7 +219,7 @@ export class Room {
   }
 
   /**
-   * Creates a new StrokeObject and registers it into the room's canvas state.
+   * Creates a new StrokeObject and registers it into the room's canvas state and operations log.
    */
   public applyStrokeBegin(
     opId: string,
@@ -131,11 +250,25 @@ export class Room {
       isComplete: false,
     };
     this.objects.set(strokeId, stroke);
+    this.recordOperation({
+      op_id: opId,
+      seq,
+      userId: authorId,
+      type: MessageType.STROKE_BEGIN,
+      payload: {
+        op_id: opId,
+        strokeId,
+        color,
+        width,
+        startPoint,
+      },
+      ts: stroke.updatedAt,
+    });
     return stroke;
   }
 
   /**
-   * Appends batched points to an active freehand stroke.
+   * Appends batched points to an active freehand stroke and records the operation.
    */
   public applyStrokePoints(opId: string, strokeId: string, points: Point[]): StrokeObject | null {
     if (this.hasProcessedOp(opId)) {
@@ -151,11 +284,25 @@ export class Room {
     obj.seq = seq;
     obj.updatedAt = Date.now();
     obj.points.push(...points);
+
+    this.recordOperation({
+      op_id: opId,
+      seq,
+      userId: obj.authorId,
+      type: MessageType.STROKE_POINTS,
+      payload: {
+        op_id: opId,
+        strokeId,
+        points,
+      },
+      ts: obj.updatedAt,
+    });
+
     return obj;
   }
 
   /**
-   * Finalizes a freehand stroke and marks it complete.
+   * Finalizes a freehand stroke, marks it complete, and records the operation.
    */
   public applyStrokeEnd(opId: string, strokeId: string, finalPoint?: Point): StrokeObject | null {
     if (this.hasProcessedOp(opId)) {
@@ -174,6 +321,20 @@ export class Room {
       obj.points.push(finalPoint);
     }
     obj.isComplete = true;
+
+    this.recordOperation({
+      op_id: opId,
+      seq,
+      userId: obj.authorId,
+      type: MessageType.STROKE_END,
+      payload: {
+        op_id: opId,
+        strokeId,
+        finalPoint,
+      },
+      ts: obj.updatedAt,
+    });
+
     return obj;
   }
 
@@ -182,10 +343,14 @@ export class Room {
   }
 
   /**
-   * Erases specified whiteboard objects by ID.
+   * Erases specified whiteboard objects by ID and records the ERASE operation.
    * Ensures idempotency: if opId was already processed, returns existing state without incrementing seq.
    */
-  public eraseObjects(opId: string, objectIds: string[]): { seq: number; erasedIds: string[] } {
+  public eraseObjects(
+    opId: string,
+    objectIds: string[],
+    userId: string = '',
+  ): { seq: number; erasedIds: string[] } {
     if (this.hasProcessedOp(opId)) {
       return { seq: this.seq, erasedIds: [] };
     }
@@ -198,21 +363,90 @@ export class Room {
       }
     }
     const seq = this.nextSeq();
+
+    this.recordOperation({
+      op_id: opId,
+      seq,
+      userId,
+      type: MessageType.ERASE,
+      payload: {
+        op_id: opId,
+        objectIds,
+      },
+      ts: Date.now(),
+    });
+
     return { seq, erasedIds };
   }
 
   /**
-   * Clears all objects from the whiteboard canvas.
+   * Clears all objects from the whiteboard canvas and records the CLEAR_CANVAS operation.
    * Ensures idempotency: if opId was already processed, returns existing seq without duplicate mutations.
    */
-  public clearCanvas(opId: string): { seq: number } {
+  public clearCanvas(opId: string, userId: string = ''): { seq: number } {
     if (this.hasProcessedOp(opId)) {
       return { seq: this.seq };
     }
     this.markOpProcessed(opId);
     this.objects.clear();
     const seq = this.nextSeq();
+
+    this.recordOperation({
+      op_id: opId,
+      seq,
+      userId: userId || this.hostUserId,
+      type: MessageType.CLEAR_CANVAS,
+      payload: {
+        op_id: opId,
+      },
+      ts: Date.now(),
+    });
+
+    this.recordSystemMessage('Whiteboard canvas was cleared by the room host.');
+
     return { seq };
+  }
+
+  /**
+   * Returns all recorded operations with a sequence number strictly greater than sinceSeq.
+   */
+  public getOperationsSince(sinceSeq: number): SequencedOperation[] {
+    return this.operationsLog.filter((op) => op.seq > sinceSeq);
+  }
+
+  /**
+   * Generates resync data for a client requesting missed operations since lastSeq.
+   * If the client gap is within the retained operations window and <= MAX_RESYNC_OPS_WINDOW,
+   * supplies the incremental operations.
+   * If the gap exceeds the window or falls before the oldest retained sequence number,
+   * supplies a complete materialized RoomSnapshot.
+   */
+  public getResyncData(lastSeq: number): ResyncResponsePayload {
+    if (lastSeq >= this.seq) {
+      return {
+        from_seq: lastSeq,
+        to_seq: this.seq,
+        operations: [],
+      };
+    }
+
+    const gap = this.seq - lastSeq;
+    // If client requested a sequence number older than what compaction retained (baseSeq > 0 && lastSeq < baseSeq)
+    // or if the gap exceeds MAX_RESYNC_OPS_WINDOW, supply the full materialized snapshot.
+    if ((this.baseSeq > 0 && lastSeq < this.baseSeq) || gap > MAX_RESYNC_OPS_WINDOW) {
+      return {
+        from_seq: 0,
+        to_seq: this.seq,
+        fullSnapshot: this.getSnapshot(),
+      };
+    }
+
+    const operations = this.getOperationsSince(lastSeq);
+    return {
+      from_seq: lastSeq + 1,
+      to_seq: this.seq,
+      operations,
+    };
   }
 
   /**
@@ -259,6 +493,7 @@ export class Room {
     this.broadcast(joinedEnvelope);
 
     this.participants.set(session.userId, { session, participant });
+    this.recordSystemMessage(`${username} joined the whiteboard.`);
     this.logger.info(
       `Participant joined: ${username} (${session.userId}) as ${assignedRole}. Total: ${this.participants.size}`,
     );
@@ -292,6 +527,9 @@ export class Room {
     );
 
     this.broadcast(leftEnvelope);
+    this.recordSystemMessage(
+      `${entry.participant.username} left the session.${reason ? ` (${reason})` : ''}`,
+    );
     this.logger.info(
       `Participant left: ${entry.participant.username} (${userId}). Total remaining: ${this.participants.size}`,
     );
@@ -381,7 +619,7 @@ export class Room {
       seq: this.seq,
       objects: objectsRecord,
       participants: this.getParticipants(),
-      chatHistory: [],
+      chatHistory: this.getChatHistory(),
       locked: this.locked,
       createdAt: this.createdAt,
     };

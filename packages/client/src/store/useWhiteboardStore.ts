@@ -21,8 +21,10 @@ import {
   type ParticipantListPayload,
   type Point,
   type RemoteCursor,
+  type ResyncResponsePayload,
   Role,
   type RoomStatePayload,
+  type SequencedOperation,
   type StrokeBeginPayload,
   type StrokeEndPayload,
   type StrokeObject,
@@ -118,6 +120,7 @@ export interface WhiteboardState {
   broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
   eraseObjects: (objectIds: string[]) => void;
   clearCanvas: () => void;
+  requestResync: (lastSeq?: number) => void;
 }
 
 function getElectronAPI() {
@@ -125,6 +128,79 @@ function getElectronAPI() {
     return window.electronAPI;
   }
   return undefined;
+}
+
+/**
+ * Mutates an objects dictionary by applying a single sequenced operation.
+ * Used for deterministic log replay during incremental state synchronization.
+ */
+export function applySequencedOpToObjects(
+  objects: Record<string, WhiteboardObject>,
+  op: SequencedOperation,
+): void {
+  switch (op.type) {
+    case MessageType.STROKE_BEGIN: {
+      const p = op.payload as StrokeBeginPayload;
+      const existing = objects[p.strokeId];
+      if (existing && existing.type === 'stroke') {
+        existing.seq = op.seq;
+      } else {
+        objects[p.strokeId] = {
+          id: p.strokeId,
+          authorId: op.userId,
+          seq: op.seq,
+          zIndex: Object.keys(objects).length + 1,
+          updatedAt: op.ts,
+          type: 'stroke',
+          color: p.color,
+          width: p.width,
+          points: [p.startPoint],
+          isComplete: false,
+        };
+      }
+      break;
+    }
+
+    case MessageType.STROKE_POINTS: {
+      const p = op.payload as StrokePointsPayload;
+      const obj = objects[p.strokeId];
+      if (obj && obj.type === 'stroke') {
+        obj.points.push(...p.points);
+        obj.seq = op.seq;
+        obj.updatedAt = op.ts;
+      }
+      break;
+    }
+
+    case MessageType.STROKE_END: {
+      const p = op.payload as StrokeEndPayload;
+      const obj = objects[p.strokeId];
+      if (obj && obj.type === 'stroke') {
+        if (p.finalPoint) {
+          obj.points.push(p.finalPoint);
+        }
+        obj.isComplete = true;
+        obj.seq = op.seq;
+        obj.updatedAt = op.ts;
+      }
+      break;
+    }
+
+    case MessageType.ERASE: {
+      const p = op.payload as ErasePayload;
+      for (const id of p.objectIds) {
+        delete objects[id];
+      }
+      break;
+    }
+
+    case MessageType.CLEAR_CANVAS: {
+      for (const id of Object.keys(objects)) {
+        delete objects[id];
+      }
+      break;
+    }
+  }
 }
 
 export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
@@ -200,7 +276,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   setRightPanelOpen: (open) => {
-    set({ rightPanelOpen: open, ...(open ? { unreadChatCount: 0 } : {}) });
+    set((state) => ({
+      rightPanelOpen: open,
+      ...(open && state.rightPanelTab === 'chat' ? { unreadChatCount: 0 } : {}),
+    }));
   },
 
   setRightPanelTab: (tab) => {
@@ -497,7 +576,30 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     }
   },
 
+  requestResync: (explicitLastSeq) => {
+    const { currentUser, roomInfo, lastAppliedSeq } = get();
+    const api = getElectronAPI();
+    if (!currentUser || !roomInfo || !api) return;
+
+    const targetSeq = explicitLastSeq !== undefined ? explicitLastSeq : lastAppliedSeq;
+    api.sendMessage(
+      createEnvelope(
+        MessageType.RESYNC_REQUEST,
+        { last_seq: targetSeq },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+  },
+
   handleIncomingEnvelope: (envelope) => {
+    // Gap detection: if receiving a sequenced operation beyond expected next seq, trigger resync catch-up
+    if (envelope.seq > 0 && get().lastAppliedSeq > 0) {
+      const expectedSeq = get().lastAppliedSeq + 1;
+      if (envelope.seq > expectedSeq && envelope.type !== MessageType.RESYNC_RESPONSE) {
+        get().requestResync();
+      }
+    }
+
     switch (envelope.type) {
       case MessageType.ROOM_STATE: {
         const payload = envelope.payload as RoomStatePayload;
@@ -702,22 +804,46 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           username?: string;
           color?: string;
           ts?: number;
+          isSystem?: boolean;
         };
 
-        const newEntry: ChatEntry = {
-          id: payload.id || envelope.msg_id,
-          userId: envelope.user_id,
-          username: payload.username || 'User',
-          color: payload.color || '#3B82F6',
-          text: payload.text,
-          ts: payload.ts || envelope.ts,
-        };
+        const msgId = payload.id || envelope.msg_id;
 
-        set((state) => ({
-          chatMessages: [...state.chatMessages, newEntry],
-          unreadChatCount:
-            state.rightPanelOpen && state.rightPanelTab === 'chat' ? 0 : state.unreadChatCount + 1,
-        }));
+        set((state) => {
+          if (state.chatMessages.some((m) => m.id === msgId)) {
+            return state;
+          }
+
+          const newEntry: ChatEntry = {
+            id: msgId,
+            userId: envelope.user_id,
+            username: payload.username || 'User',
+            color: payload.color || '#3B82F6',
+            text: payload.text,
+            ts: payload.ts || envelope.ts,
+            isSystem: payload.isSystem,
+          };
+
+          return {
+            chatMessages: [...state.chatMessages, newEntry],
+            unreadChatCount:
+              state.rightPanelOpen && state.rightPanelTab === 'chat'
+                ? 0
+                : state.unreadChatCount + 1,
+          };
+        });
+        break;
+      }
+
+      case MessageType.CHAT_HISTORY: {
+        const payload = envelope.payload as { messages: ChatEntry[] };
+        set((state) => {
+          const existingIds = new Set(state.chatMessages.map((m) => m.id));
+          const newEntries = (payload.messages || []).filter((m) => !existingIds.has(m.id));
+          return {
+            chatMessages: [...state.chatMessages, ...newEntries],
+          };
+        });
         break;
       }
 
@@ -754,6 +880,33 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             chatMessages: [...state.chatMessages, systemNotice],
           };
         });
+        break;
+      }
+
+      case MessageType.RESYNC_RESPONSE: {
+        const payload = envelope.payload as ResyncResponsePayload;
+        if (payload.fullSnapshot) {
+          set((state) => ({
+            objects: payload.fullSnapshot!.objects || {},
+            lastAppliedSeq: Math.max(state.lastAppliedSeq, payload.fullSnapshot!.seq),
+            participants: payload.fullSnapshot!.participants || state.participants,
+          }));
+        } else if (payload.operations && payload.operations.length > 0) {
+          set((state) => {
+            const nextObjects = { ...state.objects };
+            for (const op of payload.operations!) {
+              applySequencedOpToObjects(nextObjects, op);
+            }
+            return {
+              objects: nextObjects,
+              lastAppliedSeq: Math.max(state.lastAppliedSeq, payload.to_seq),
+            };
+          });
+        } else {
+          set((state) => ({
+            lastAppliedSeq: Math.max(state.lastAppliedSeq, payload.to_seq),
+          }));
+        }
         break;
       }
     }

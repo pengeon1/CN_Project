@@ -92,6 +92,16 @@ export const MAX_CHAT_HISTORY_SIZE = 200;
 export const MAX_RESYNC_OPS_WINDOW = 500;
 
 /**
+ * Maximum number of operations retained in the server-side operations log before triggering compaction.
+ */
+export const MAX_OPS_LOG_SIZE = 1000;
+
+/**
+ * Number of recent operations retained in the operations log after compaction.
+ */
+export const COMPACT_RETAIN_OPS = 500;
+
+/**
  * Standard palette of distinct participant cursor and avatar colors.
  */
 export const PARTICIPANT_COLORS = [

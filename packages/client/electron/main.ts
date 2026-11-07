@@ -25,7 +25,7 @@ let mainWindow: BrowserWindow | null = null;
 let tcpClient: MainTcpClient | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 
 function getLanAddresses(): string[] {
   const interfaces = os.networkInterfaces();

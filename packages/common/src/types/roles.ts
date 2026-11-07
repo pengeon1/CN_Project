@@ -20,10 +20,10 @@ export type Role = (typeof Role)[keyof typeof Role];
  * Helper to determine whether a role has authorization to mutate the canvas state
  * (drawing strokes, adding/updating/deleting shapes, clearing canvas, erasing).
  *
- * @param role The participant's role
- * @returns true if role is HOST or EDITOR, false if VIEWER
+ * @param role The participant's role (or null/undefined if unauthenticated/unassigned)
+ * @returns true if role is HOST or EDITOR, false if VIEWER or null
  */
-export function canMutateCanvas(role: Role): boolean {
+export function canMutateCanvas(role: Role | null | undefined): boolean {
   return role === Role.HOST || role === Role.EDITOR;
 }
 
@@ -31,9 +31,9 @@ export function canMutateCanvas(role: Role): boolean {
  * Helper to determine whether a role has administrative authority in the room
  * (clearing canvas, kicking participants, locking the room, changing participant roles).
  *
- * @param role The participant's role
+ * @param role The participant's role (or null/undefined if unauthenticated/unassigned)
  * @returns true if role is HOST
  */
-export function isHost(role: Role): boolean {
+export function isHost(role: Role | null | undefined): boolean {
   return role === Role.HOST;
 }

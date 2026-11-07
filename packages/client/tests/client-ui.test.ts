@@ -3,10 +3,14 @@ import {
   createEnvelope,
   generateUuid,
   MessageType,
+  type ResyncResponsePayload,
   Role,
   type RoomStatePayload,
+  type SequencedOperation,
+  type StrokeObject,
+  type WhiteboardObject,
 } from '@cn-whiteboard/common';
-import { useWhiteboardStore } from '../src/store/useWhiteboardStore.js';
+import { applySequencedOpToObjects, useWhiteboardStore } from '../src/store/useWhiteboardStore.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 
 describe('Client UI & Store Suite', () => {
@@ -431,13 +435,318 @@ describe('Client UI & Store Suite', () => {
 
   it('detects editable form elements to prevent hotkey hijacking while typing', () => {
     expect(isEditableElement(null)).toBe(false);
-    expect(isEditableElement({} as EventTarget)).toBe(false);
-    expect(isEditableElement({ tagName: 'DIV' } as EventTarget)).toBe(false);
-    expect(isEditableElement({ tagName: 'INPUT' } as EventTarget)).toBe(true);
-    expect(isEditableElement({ tagName: 'textarea' } as EventTarget)).toBe(true);
-    expect(isEditableElement({ tagName: 'SELECT' } as EventTarget)).toBe(true);
-    expect(isEditableElement({ tagName: 'DIV', isContentEditable: true } as EventTarget)).toBe(
-      true,
-    );
+    expect(isEditableElement({} as unknown as EventTarget)).toBe(false);
+    expect(isEditableElement({ tagName: 'DIV' } as unknown as EventTarget)).toBe(false);
+    expect(isEditableElement({ tagName: 'INPUT' } as unknown as EventTarget)).toBe(true);
+    expect(isEditableElement({ tagName: 'textarea' } as unknown as EventTarget)).toBe(true);
+    expect(isEditableElement({ tagName: 'SELECT' } as unknown as EventTarget)).toBe(true);
+    expect(
+      isEditableElement({ tagName: 'DIV', isContentEditable: true } as unknown as EventTarget),
+    ).toBe(true);
+  });
+
+  describe('Late-Join & Resync Store Synchronization (Phase 6)', () => {
+    it('applies sequenced operations to objects dictionary during incremental replay', () => {
+      const objects: Record<string, WhiteboardObject> = {};
+      const strokeId = generateUuid();
+      const authorId = generateUuid();
+
+      // 1. STROKE_BEGIN
+      const beginOp: SequencedOperation = {
+        op_id: generateUuid(),
+        seq: 1,
+        userId: authorId,
+        type: MessageType.STROKE_BEGIN,
+        payload: {
+          op_id: generateUuid(),
+          strokeId,
+          color: '#18A0FB',
+          width: 4,
+          startPoint: { x: 5, y: 10 },
+        },
+        ts: 1000,
+      };
+      applySequencedOpToObjects(objects, beginOp);
+      expect(objects[strokeId]).toBeDefined();
+      expect((objects[strokeId] as StrokeObject).points.length).toBe(1);
+      expect((objects[strokeId] as StrokeObject).isComplete).toBe(false);
+
+      // 2. STROKE_POINTS
+      const pointsOp: SequencedOperation = {
+        op_id: generateUuid(),
+        seq: 2,
+        userId: authorId,
+        type: MessageType.STROKE_POINTS,
+        payload: {
+          op_id: generateUuid(),
+          strokeId,
+          points: [{ x: 15, y: 20 }],
+        },
+        ts: 1050,
+      };
+      applySequencedOpToObjects(objects, pointsOp);
+      expect((objects[strokeId] as StrokeObject).points.length).toBe(2);
+
+      // 3. STROKE_END
+      const endOp: SequencedOperation = {
+        op_id: generateUuid(),
+        seq: 3,
+        userId: authorId,
+        type: MessageType.STROKE_END,
+        payload: {
+          op_id: generateUuid(),
+          strokeId,
+          finalPoint: { x: 25, y: 30 },
+        },
+        ts: 1100,
+      };
+      applySequencedOpToObjects(objects, endOp);
+      expect((objects[strokeId] as StrokeObject).points.length).toBe(3);
+      expect((objects[strokeId] as StrokeObject).isComplete).toBe(true);
+
+      // 4. ERASE
+      const eraseOp: SequencedOperation = {
+        op_id: generateUuid(),
+        seq: 4,
+        userId: authorId,
+        type: MessageType.ERASE,
+        payload: {
+          op_id: generateUuid(),
+          objectIds: [strokeId],
+        },
+        ts: 1150,
+      };
+      applySequencedOpToObjects(objects, eraseOp);
+      expect(objects[strokeId]).toBeUndefined();
+    });
+
+    it('hydrates store completely when receiving RESYNC_RESPONSE with fullSnapshot', () => {
+      const strokeId = generateUuid();
+      const snapshot: RoomStatePayload = {
+        roomCode: 'SNAP01',
+        roomName: 'Snapshot Room',
+        seq: 42,
+        objects: {
+          [strokeId]: {
+            id: strokeId,
+            authorId: 'user-1',
+            seq: 40,
+            zIndex: 1,
+            updatedAt: Date.now(),
+            type: 'stroke',
+            color: '#10B981',
+            width: 3,
+            points: [
+              { x: 10, y: 10 },
+              { x: 20, y: 20 },
+            ],
+            isComplete: true,
+          },
+        },
+        participants: [
+          {
+            id: 'user-1',
+            username: 'Alice',
+            role: Role.HOST,
+            color: '#10B981',
+            joinedAt: Date.now(),
+          },
+        ],
+        chatHistory: [],
+        locked: false,
+        createdAt: Date.now(),
+      };
+
+      const resyncPayload: ResyncResponsePayload = {
+        from_seq: 0,
+        to_seq: 42,
+        fullSnapshot: snapshot,
+      };
+
+      useWhiteboardStore.getState().handleIncomingEnvelope(
+        createEnvelope(MessageType.RESYNC_RESPONSE, resyncPayload, {
+          room: 'SNAP01',
+          user_id: 'user-2',
+          seq: 42,
+        }),
+      );
+
+      const state = useWhiteboardStore.getState();
+      expect(state.objects[strokeId]).toBeDefined();
+      expect(state.lastAppliedSeq).toBe(42);
+      expect(state.participants.length).toBe(1);
+    });
+
+    it('replays operations incrementally when receiving RESYNC_RESPONSE with operations array', () => {
+      useWhiteboardStore.setState({ lastAppliedSeq: 10, objects: {} });
+      const strokeId = generateUuid();
+
+      const ops: SequencedOperation[] = [
+        {
+          op_id: generateUuid(),
+          seq: 11,
+          userId: 'user-1',
+          type: MessageType.STROKE_BEGIN,
+          payload: {
+            op_id: generateUuid(),
+            strokeId,
+            color: '#3B82F6',
+            width: 2,
+            startPoint: { x: 50, y: 50 },
+          },
+          ts: 2000,
+        },
+        {
+          op_id: generateUuid(),
+          seq: 12,
+          userId: 'user-1',
+          type: MessageType.STROKE_END,
+          payload: {
+            op_id: generateUuid(),
+            strokeId,
+          },
+          ts: 2050,
+        },
+      ];
+
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.RESYNC_RESPONSE,
+            { from_seq: 11, to_seq: 12, operations: ops },
+            { room: 'ROOM1', user_id: 'user-1', seq: 12 },
+          ),
+        );
+
+      const state = useWhiteboardStore.getState();
+      expect(state.objects[strokeId]).toBeDefined();
+      expect((state.objects[strokeId] as StrokeObject).isComplete).toBe(true);
+      expect(state.lastAppliedSeq).toBe(12);
+    });
+  });
+
+  describe('Group Chat & Presence Badging (Phase 7)', () => {
+    it('increments unreadChatCount when CHAT_MESSAGE arrives and panel is closed', () => {
+      const store = useWhiteboardStore.getState();
+      store.setRightPanelOpen(false);
+
+      const msgId = generateUuid();
+      const senderId = generateUuid();
+
+      store.handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.CHAT_MESSAGE,
+          {
+            id: msgId,
+            text: 'Hey everyone, check the top right corner!',
+            username: 'Bob',
+            color: '#3B82F6',
+            ts: Date.now(),
+          },
+          {
+            room: 'CHAT01',
+            user_id: senderId,
+            seq: 15,
+          },
+        ),
+      );
+
+      const state = useWhiteboardStore.getState();
+      expect(state.chatMessages).toHaveLength(1);
+      expect(state.chatMessages[0]!.text).toBe('Hey everyone, check the top right corner!');
+      expect(state.unreadChatCount).toBe(1);
+
+      // Opening the panel resets unread count
+      state.setRightPanelOpen(true);
+      expect(useWhiteboardStore.getState().unreadChatCount).toBe(0);
+    });
+
+    it('tracks unreadChatCount when panel is open on participants tab and resets on switching to chat', () => {
+      const store = useWhiteboardStore.getState();
+      store.setRightPanelOpen(true);
+      store.setRightPanelTab('participants');
+
+      store.handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.CHAT_MESSAGE,
+          {
+            id: generateUuid(),
+            text: 'Notice while on participants tab',
+            username: 'Alice',
+            color: '#EF4444',
+          },
+          { room: 'CHAT01', user_id: generateUuid(), seq: 16 },
+        ),
+      );
+
+      expect(useWhiteboardStore.getState().unreadChatCount).toBe(1);
+
+      // Switching tab to 'chat' clears the unread badge
+      useWhiteboardStore.getState().setRightPanelTab('chat');
+      expect(useWhiteboardStore.getState().unreadChatCount).toBe(0);
+    });
+
+    it('deduplicates incoming CHAT_MESSAGE by message ID', () => {
+      const store = useWhiteboardStore.getState();
+      store.setRightPanelOpen(true);
+      store.setRightPanelTab('chat');
+
+      const dupId = generateUuid();
+      const senderId = generateUuid();
+      const envelope = createEnvelope(
+        MessageType.CHAT_MESSAGE,
+        {
+          id: dupId,
+          text: 'Duplicate test message',
+          username: 'Charlie',
+          color: '#10B981',
+        },
+        { room: 'CHAT01', user_id: senderId, seq: 17 },
+      );
+
+      store.handleIncomingEnvelope(envelope);
+      store.handleIncomingEnvelope(envelope); // Duplicate delivery
+
+      const state = useWhiteboardStore.getState();
+      expect(state.chatMessages.filter((m) => m.id === dupId)).toHaveLength(1);
+    });
+
+    it('hydrates store messages when CHAT_HISTORY is received', () => {
+      const store = useWhiteboardStore.getState();
+      const msg1Id = generateUuid();
+      const msg2Id = generateUuid();
+
+      store.handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.CHAT_HISTORY,
+          {
+            messages: [
+              {
+                id: msg1Id,
+                userId: generateUuid(),
+                username: 'Host',
+                color: '#EF4444',
+                text: 'Welcome to the room',
+                ts: 1000,
+              },
+              {
+                id: msg2Id,
+                userId: generateUuid(),
+                username: 'Editor',
+                color: '#3B82F6',
+                text: 'Thanks!',
+                ts: 2000,
+              },
+            ],
+          },
+          { room: 'CHAT01', user_id: 'server', seq: 5 },
+        ),
+      );
+
+      const state = useWhiteboardStore.getState();
+      expect(state.chatMessages.some((m) => m.id === msg1Id)).toBe(true);
+      expect(state.chatMessages.some((m) => m.id === msg2Id)).toBe(true);
+    });
   });
 });

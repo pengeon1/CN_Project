@@ -3,7 +3,7 @@
  * Houses the real-time group chat channel and active room participant list.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Send, Shield, Users, X } from 'lucide-react';
 import { Role } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
@@ -13,6 +13,7 @@ export const RightPanel: React.FC = () => {
     rightPanelOpen,
     rightPanelTab,
     chatMessages,
+    unreadChatCount,
     participants,
     currentUser,
     setRightPanelOpen,
@@ -21,6 +22,13 @@ export const RightPanel: React.FC = () => {
   } = useWhiteboardStore();
 
   const [inputDraft, setInputDraft] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (rightPanelTab === 'chat') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, rightPanelTab]);
 
   if (!rightPanelOpen) {
     return null;
@@ -53,6 +61,11 @@ export const RightPanel: React.FC = () => {
           >
             <MessageSquare className="h-3.5 w-3.5" />
             Chat
+            {unreadChatCount > 0 && rightPanelTab !== 'chat' && (
+              <span className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-bold text-white shadow">
+                {unreadChatCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setRightPanelTab('participants')}
@@ -126,6 +139,7 @@ export const RightPanel: React.FC = () => {
                 );
               })
             )}
+            <div ref={messagesEndRef} />
           </div>
 
           {/* Chat Message Input Form with Green Send Button */}

@@ -14,6 +14,7 @@ export const TopBar: React.FC = () => {
     currentUser,
     participants,
     rightPanelOpen,
+    rightPanelTab,
     unreadChatCount,
     isDarkTheme,
     setRightPanelOpen,
@@ -119,7 +120,7 @@ export const TopBar: React.FC = () => {
           }`}
         >
           <MessageSquare className="h-4 w-4" />
-          {unreadChatCount > 0 && !rightPanelOpen && (
+          {unreadChatCount > 0 && (!rightPanelOpen || rightPanelTab !== 'chat') && (
             <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-bold text-white shadow">
               {unreadChatCount}
             </span>

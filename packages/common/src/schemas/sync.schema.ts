@@ -48,5 +48,6 @@ export const SaveStatePayloadSchema = z.object({
 });
 
 export const LoadStatePayloadSchema = z.object({
-  snapshot: RoomSnapshotSchema,
+  loadedAt: z.number().int().positive().optional(),
+  filename: z.string().max(256).optional(),
 });

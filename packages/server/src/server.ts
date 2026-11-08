@@ -16,6 +16,7 @@
 
 import * as net from 'node:net';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   canMutateCanvas,
   type ChatMessage,
@@ -32,6 +33,8 @@ import {
   MessageType,
   PROTOCOL_VERSION,
   type ResyncRequestPayload,
+  type SaveStatePayload,
+  type LoadStatePayload,
   type StrokeBeginPayload,
   type StrokeEndPayload,
   type StrokePointsPayload,
@@ -40,6 +43,7 @@ import {
 import { Logger } from './logger.js';
 import { RoomManager } from './room-manager.js';
 import type { Room } from './room.js';
+import { RoomPersistence } from './room-persistence.js';
 import { ClientSession } from './session.js';
 
 export interface ServerOptions {
@@ -66,6 +70,8 @@ export class WhiteboardServer {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly heartbeatIntervalMs: number;
   private readonly heartbeatTimeoutMs: number;
+  private readonly persistence: RoomPersistence;
+  private hasRestoredRooms = false;
   private logger = new Logger('TCPServer');
   private isClosing = false;
 
@@ -74,7 +80,8 @@ export class WhiteboardServer {
     this.port = options.port;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
-    this.roomManager = new RoomManager();
+    this.persistence = new RoomPersistence(options.dataDir ?? path.resolve(process.cwd(), 'data'));
+    this.roomManager = new RoomManager((room) => this.persistence.scheduleSave(room));
     this.server = net.createServer((socket) => this.handleNewConnection(socket));
   }
 
@@ -891,6 +898,70 @@ export class WhiteboardServer {
         break;
       }
 
+      case MessageType.SAVE_STATE: {
+        const room = this.requireRoom(session, envelope, 'You must join a room before saving');
+        if (!room) return;
+        if (
+          !this.authorize(session, envelope, room, isHost(session.role), 'Only the host can save')
+        ) {
+          return;
+        }
+
+        validatePayload<SaveStatePayload>(MessageType.SAVE_STATE, envelope.payload);
+        const result = await room.enqueue(() => this.persistence.saveRoom(room));
+        session.send(
+          createEnvelope(MessageType.SAVE_STATE, result, {
+            msg_id: envelope.msg_id,
+            room: room.code,
+            user_id: session.userId,
+            seq: room.seq,
+          }),
+        );
+        break;
+      }
+
+      case MessageType.LOAD_STATE: {
+        const room = this.requireRoom(session, envelope, 'You must join a room before loading');
+        if (!room) return;
+        if (
+          !this.authorize(session, envelope, room, isHost(session.role), 'Only the host can load')
+        ) {
+          return;
+        }
+
+        validatePayload<LoadStatePayload>(MessageType.LOAD_STATE, envelope.payload);
+        const saved = await this.persistence.loadRoom(room.code);
+        if (!saved) {
+          this.sendError(
+            session,
+            'SAVE_NOT_FOUND',
+            'No saved state exists for this room yet',
+            envelope,
+            room.code,
+          );
+          return;
+        }
+
+        await room.enqueue(() => {
+          room.restorePersistedState(saved.state, { preserveSequence: true });
+          room.recordEvent(MessageType.LOAD_STATE, {}, session.userId);
+          room.broadcastSnapshot();
+          session.send(
+            createEnvelope(
+              MessageType.LOAD_STATE,
+              { loadedAt: Date.now(), filename: path.basename(saved.filename) },
+              {
+                msg_id: envelope.msg_id,
+                room: room.code,
+                user_id: session.userId,
+                seq: room.seq,
+              },
+            ),
+          );
+        });
+        break;
+      }
+
       default: {
         this.logger.debug(`Unhandled message type: ${envelope.type}`);
         break;
@@ -921,6 +992,12 @@ export class WhiteboardServer {
    * Starts the TCP server listening on the configured network interface and port.
    */
   public async listen(): Promise<{ port: number; host: string }> {
+    if (!this.hasRestoredRooms) {
+      const savedRooms = await this.persistence.loadAll();
+      this.roomManager.restoreRooms(savedRooms.map(({ state }) => state));
+      this.hasRestoredRooms = true;
+    }
+
     return new Promise((resolve, reject) => {
       this.server.on('error', (err) => reject(err));
 
@@ -961,11 +1038,12 @@ export class WhiteboardServer {
     }
     this.sessions.clear();
 
-    return new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       this.server.close(() => {
         this.logger.info('Server closed cleanly');
         resolve();
       });
     });
+    await this.persistence.flush();
   }
 }

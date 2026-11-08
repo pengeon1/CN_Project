@@ -12,9 +12,10 @@
 
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { app, BrowserWindow, ipcMain } from 'electron';
-import type { MessageEnvelope } from '@cn-whiteboard/common';
-import type { ConnectOptions } from '../src/types/ipc.js';
+import * as fs from 'node:fs/promises';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { RoomSnapshotSchema, type MessageEnvelope, type RoomSnapshot } from '@cn-whiteboard/common';
+import type { ConnectOptions, ExportBoardResult } from '../src/types/ipc.js';
 import { MainTcpClient, type TcpClientSink } from './tcp-client.js';
 
 // Optimize Chromium rasterization for crisp subpixel font rendering and high-DPI displays
@@ -131,6 +132,48 @@ ipcMain.handle('tcp:send', async (_event, envelope: MessageEnvelope) => {
 ipcMain.handle('net:get-lan-ips', async () => {
   return getLanAddresses();
 });
+
+ipcMain.handle(
+  'board:export',
+  async (_event, snapshot: RoomSnapshot): Promise<ExportBoardResult> => {
+    const parsedSnapshot = RoomSnapshotSchema.safeParse(snapshot);
+    if (!parsedSnapshot.success) {
+      return { success: false, error: 'The current board snapshot is invalid.' };
+    }
+
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { success: false, error: 'The whiteboard window is unavailable.' };
+    }
+
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export whiteboard',
+      defaultPath: `${parsedSnapshot.data.roomName.replace(/[\\/:*?"<>|]/g, '_')}.json`,
+      filters: [{ name: 'JSON files', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePath) {
+      return { success: true, canceled: true };
+    }
+
+    const filePath =
+      path.extname(result.filePath).toLowerCase() === '.json'
+        ? result.filePath
+        : `${result.filePath}.json`;
+    const exportedBoard = {
+      schemaVersion: 1,
+      exportedAt: Date.now(),
+      ...parsedSnapshot.data,
+    };
+
+    try {
+      await fs.writeFile(filePath, `${JSON.stringify(exportedBoard, null, 2)}\n`, 'utf8');
+      return { success: true, filePath };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown file write error';
+      console.error(`[Main Process] Failed to export whiteboard: ${message}`);
+      return { success: false, error: `Could not write the export file: ${message}` };
+    }
+  },
+);
 
 app.whenReady().then(() => {
   mainWindow = createMainWindow();

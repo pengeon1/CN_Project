@@ -306,7 +306,8 @@ export interface SaveStatePayload {
 }
 
 export interface LoadStatePayload {
-  snapshot: RoomSnapshot;
+  loadedAt?: number;
+  filename?: string;
 }
 
 export interface ErrorPayload {

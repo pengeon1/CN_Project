@@ -1019,9 +1019,17 @@ The behaviour above is exercised by automated tests, including an end-to-end sui
    - Rooms optionally require a password. Passwords are never stored in plaintext; the server computes a salted cryptographic hash using Node.js built-in `crypto.scrypt`.
    - Failed authentication attempts are rate-limited per remote IP address to defend against brute-force attacks.
 2. **Role Enforcement**:
-   - **`HOST`**: Full control. Only the host can execute `CLEAR_CANVAS`, `PERMISSION_CHANGE` (promote/demote/kick), lock the room, and trigger server-side persistence (`SAVE_STATE`).
+   - **`HOST`**: Full control. Only the host can execute `CLEAR_CANVAS`, `PERMISSION_CHANGE` (promote/demote/kick), lock the room, and trigger server-side persistence (`SAVE_STATE`, `LOAD_STATE`).
    - **`EDITOR`**: Can draw, modify own objects, create shapes, and chat.
    - **`VIEWER`**: Read-only observer. Cannot send canvas mutations. If a `VIEWER` client emits a drawing operation, the server rejects it with an `ERROR` message (`FORBIDDEN`).
 3. **Zero-Trust Input Validation**:
    - The server **never** trusts incoming client data.
    - Every received message envelope and payload is strictly validated via Zod schemas before entering the room operations queue. Invalid shapes, non-finite coordinates, and out-of-range dimensions are rejected at the protocol boundary.
+
+## 9. Room Persistence
+
+- The server debounces room changes and atomically writes versioned JSON files named `<ROOM_CODE>.json` under `--data-dir` (default: `./data`). Temporary files are renamed into place only after the async write completes.
+- Saved state includes board objects, sequence/resync history, chat, undo/redo history, and room access settings. Live socket sessions and connected participants are intentionally not restored.
+- Startup validates persisted files before accepting connections. Invalid JSON or state produces a startup error instead of silently discarding data.
+- Hosts can send `SAVE_STATE` with `{}` to save immediately or `LOAD_STATE` with `{}` to load the latest server-side save. A successful load replaces the active room state and sends a fresh `ROOM_STATE` snapshot to each participant. A missing save returns `ERROR` with code `SAVE_NOT_FOUND`.
+- `SAVE_STATE` replies with `{ "savedAt": 1730644800000, "filename": "ABC234.json" }`; `LOAD_STATE` replies with `{ "loadedAt": 1730644800000, "filename": "ABC234.json" }`. These acknowledgments are unsequenced. The client can separately export its current snapshot as a JSON file using the desktop save dialog.

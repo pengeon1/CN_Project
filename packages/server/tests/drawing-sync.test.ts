@@ -18,7 +18,8 @@ import {
   type StrokeEndPayload,
   type StrokePointsPayload,
 } from '@cn-whiteboard/common';
-import { startServer, type WhiteboardServer } from '../src/index.js';
+import type { WhiteboardServer } from '../src/index.js';
+import { closeIsolatedServer, startIsolatedServer } from './helpers/isolated-server.js';
 
 class SocketTestClient {
   public socket: net.Socket;
@@ -109,7 +110,7 @@ describe('Real-time Drawing & Multi-client Synchronization', () => {
 
   beforeEach(async () => {
     // Port 0 selects an available dynamic port
-    const instance = await startServer({ host: '127.0.0.1', port: 0 });
+    const instance = await startIsolatedServer({ host: '127.0.0.1', port: 0 });
     server = instance.server;
     port = instance.port;
   });
@@ -119,7 +120,7 @@ describe('Real-time Drawing & Multi-client Synchronization', () => {
       c.close();
     }
     clients.length = 0;
-    await server.close();
+    await closeIsolatedServer(server);
   });
 
   it('broadcasts full stroke lifecycle (BEGIN, POINTS, END) to all peers in sequence', async () => {

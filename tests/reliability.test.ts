@@ -25,7 +25,11 @@ import {
   type StrokeObject,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
-import { startServer, type WhiteboardServer } from '../packages/server/src/index.js';
+import type { WhiteboardServer } from '../packages/server/src/index.js';
+import {
+  closeIsolatedServer,
+  startIsolatedServer,
+} from '../packages/server/tests/helpers/isolated-server.js';
 import {
   MainTcpClient,
   type TcpClientSink,
@@ -189,7 +193,7 @@ describe('Reliability end-to-end through a lossy network (Phase 8)', () => {
   const peers: Peer[] = [];
 
   async function startRig(): Promise<{ port: number }> {
-    const instance = await startServer({
+    const instance = await startIsolatedServer({
       host: '127.0.0.1',
       port: 0,
       heartbeatIntervalMs: 100,
@@ -323,7 +327,7 @@ describe('Reliability end-to-end through a lossy network (Phase 8)', () => {
     peers.length = 0;
     for (const proxy of proxies) await proxy.close();
     proxies.length = 0;
-    await server.close();
+    await closeIsolatedServer(server);
   });
 
   it('converges to an identical canvas under delay, duplication, reordering and loss', async () => {

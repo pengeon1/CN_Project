@@ -11,6 +11,7 @@ export * from './config.js';
 export * from './logger.js';
 export * from './session.js';
 export * from './room.js';
+export * from './room-persistence.js';
 export * from './room-manager.js';
 export * from './server.js';
 

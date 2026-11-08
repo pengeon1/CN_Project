@@ -20,7 +20,8 @@ import {
   type RoomStatePayload,
   type StrokePointsPayload,
 } from '@cn-whiteboard/common';
-import { startServer, type WhiteboardServer } from '../src/index.js';
+import type { WhiteboardServer } from '../src/index.js';
+import { closeIsolatedServer, startIsolatedServer } from './helpers/isolated-server.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -189,7 +190,7 @@ describe('Reliability suite - server side (Phase 8)', () => {
   }
 
   beforeEach(async () => {
-    const instance = await startServer({ host: '127.0.0.1', port: 0 });
+    const instance = await startIsolatedServer({ host: '127.0.0.1', port: 0 });
     server = instance.server;
     port = instance.port;
   });
@@ -199,7 +200,7 @@ describe('Reliability suite - server side (Phase 8)', () => {
     timers.length = 0;
     for (const c of clients) c.close();
     clients.length = 0;
-    await server.close();
+    await closeIsolatedServer(server);
   });
 
   describe('connection robustness', () => {
@@ -714,7 +715,7 @@ describe('Reliability suite - heartbeat timeout (Phase 8)', () => {
   const timers: NodeJS.Timeout[] = [];
 
   beforeEach(async () => {
-    const instance = await startServer({
+    const instance = await startIsolatedServer({
       host: '127.0.0.1',
       port: 0,
       heartbeatIntervalMs: 50,
@@ -729,7 +730,7 @@ describe('Reliability suite - heartbeat timeout (Phase 8)', () => {
     timers.length = 0;
     for (const c of clients) c.close();
     clients.length = 0;
-    await server.close();
+    await closeIsolatedServer(server);
   });
 
   it('drops a silent client, keeps the room alive, and lets the client resume afterwards', async () => {

@@ -1,14 +1,15 @@
 import * as net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope, encodeFrame, FrameDecoder, MessageType } from '@cn-whiteboard/common';
-import { parseConfig, startServer, WhiteboardServer } from '../src/index.js';
+import { parseConfig, WhiteboardServer } from '../src/index.js';
+import { closeIsolatedServer, startIsolatedServer } from './helpers/isolated-server.js';
 
 describe('Server CLI & Smoke Suite', () => {
   let activeServer: WhiteboardServer | undefined;
 
   afterEach(async () => {
     if (activeServer) {
-      await activeServer.close();
+      await closeIsolatedServer(activeServer);
       activeServer = undefined;
     }
   });
@@ -40,7 +41,7 @@ describe('Server CLI & Smoke Suite', () => {
   });
 
   it('starts TCP server and handles a framed PING message with PONG response', async () => {
-    const { server, port, host } = await startServer({ host: '127.0.0.1', port: 0 });
+    const { server, port, host } = await startIsolatedServer({ host: '127.0.0.1', port: 0 });
     activeServer = server;
 
     expect(port).toBeGreaterThan(0);

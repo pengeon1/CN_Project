@@ -31,7 +31,10 @@ import {
   isHost,
   type MessageEnvelope,
   MessageType,
+  type ParticipantRenamedPayload,
+  type PermissionChangePayload,
   PROTOCOL_VERSION,
+  Role,
   type ResyncRequestPayload,
   type SaveStatePayload,
   type LoadStatePayload,
@@ -232,6 +235,20 @@ export class WhiteboardServer {
     return allowed;
   }
 
+  private authorizeCanvasMutation(
+    session: ClientSession,
+    envelope: MessageEnvelope,
+    room: Room,
+  ): boolean {
+    if (!canMutateCanvas(session.role)) {
+      return this.authorize(session, envelope, room, false, 'Viewer role cannot mutate the canvas');
+    }
+    if (room.locked && !isHost(session.role)) {
+      return this.authorize(session, envelope, room, false, 'The host has locked the room');
+    }
+    return true;
+  }
+
   /**
    * Idempotency guard for client operations. If `opId` was already applied, the sender is told
    * (ACK with the seq the operation originally received) and the caller must not apply or
@@ -317,6 +334,7 @@ export class WhiteboardServer {
           roomName: string;
           username: string;
           password?: string;
+          allowNameChanges?: boolean;
         }>(MessageType.CREATE_ROOM, envelope.payload);
 
         const room = await this.roomManager.createRoom(
@@ -324,6 +342,7 @@ export class WhiteboardServer {
           payload.roomName,
           payload.username,
           payload.password,
+          payload.allowNameChanges,
         );
 
         // Send ROOM_STATE snapshot to the host
@@ -430,18 +449,180 @@ export class WhiteboardServer {
         break;
       }
 
-      case MessageType.STROKE_BEGIN: {
-        const room = this.requireRoom(session, envelope, 'You must join a room first');
+      case MessageType.UPDATE_USERNAME: {
+        const room = this.requireRoom(
+          session,
+          envelope,
+          'You must join a room to change your name',
+        );
+        if (!room) return;
+        if (!room.allowNameChanges) {
+          this.sendError(
+            session,
+            'NAME_CHANGE_DISABLED',
+            'The host has disabled participant name changes for this room',
+            envelope,
+            room.code,
+          );
+          return;
+        }
+        const payload = validatePayload<{ username: string }>(
+          MessageType.UPDATE_USERNAME,
+          envelope.payload,
+        );
+        const username = payload.username.trim();
+        await room.enqueue(() => {
+          if (!room.renameParticipant(session.userId, username)) return;
+          const renamedPayload: ParticipantRenamedPayload = {
+            userId: session.userId,
+            username,
+          };
+          const event = room.recordEvent(
+            MessageType.PARTICIPANT_RENAMED,
+            renamedPayload,
+            session.userId,
+          );
+          room.broadcast(
+            createEnvelope(MessageType.PARTICIPANT_RENAMED, renamedPayload, {
+              msg_id: envelope.msg_id,
+              seq: event.seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: event.ts,
+            }),
+          );
+        });
+        break;
+      }
+
+      case MessageType.PERMISSION_CHANGE: {
+        const room = this.requireRoom(session, envelope, 'You must join a room to manage it');
         if (!room) return;
         if (
           !this.authorize(
             session,
             envelope,
             room,
-            canMutateCanvas(session.role),
-            'Viewer role cannot mutate canvas',
+            isHost(session.role),
+            'Only the host can manage the room',
           )
         ) {
+          return;
+        }
+
+        const payload = validatePayload<PermissionChangePayload>(
+          MessageType.PERMISSION_CHANGE,
+          envelope.payload,
+        );
+
+        await room.enqueue(() => {
+          if (
+            !this.authorize(
+              session,
+              envelope,
+              room,
+              isHost(session.role),
+              'Only the host can manage the room',
+            )
+          ) {
+            return;
+          }
+
+          if (payload.lockRoom !== undefined) {
+            room.locked = payload.lockRoom;
+          } else if (payload.targetUserId) {
+            const target = room.getParticipant(payload.targetUserId);
+            if (!target) {
+              this.sendError(
+                session,
+                'INVALID_PERMISSION_CHANGE',
+                'Participant is no longer in the room',
+                envelope,
+                room.code,
+              );
+              return;
+            }
+            if (payload.targetUserId === session.userId || target.role === Role.HOST) {
+              this.sendError(
+                session,
+                'INVALID_PERMISSION_CHANGE',
+                'The host cannot change or remove their own role',
+                envelope,
+                room.code,
+              );
+              return;
+            }
+
+            if (payload.kick) {
+              const reason = payload.reason ?? 'Removed by host';
+              const permissionEvent = room.recordEvent(
+                MessageType.PERMISSION_CHANGE,
+                { ...payload, reason },
+                session.userId,
+              );
+              room.broadcast(
+                createEnvelope(
+                  MessageType.PERMISSION_CHANGE,
+                  { ...payload, reason },
+                  {
+                    msg_id: envelope.msg_id,
+                    seq: permissionEvent.seq,
+                    room: room.code,
+                    user_id: session.userId,
+                    ts: permissionEvent.ts,
+                  },
+                ),
+              );
+              if (!room.kickParticipant(payload.targetUserId, reason)) {
+                this.sendError(
+                  session,
+                  'INVALID_PERMISSION_CHANGE',
+                  'Participant is no longer in the room',
+                  envelope,
+                  room.code,
+                );
+              }
+              return;
+            }
+
+            if (
+              !payload.newRole ||
+              payload.newRole === Role.HOST ||
+              !room.setParticipantRole(payload.targetUserId, payload.newRole)
+            ) {
+              this.sendError(
+                session,
+                'INVALID_PERMISSION_CHANGE',
+                'The requested role change is not allowed',
+                envelope,
+                room.code,
+              );
+              return;
+            }
+          }
+
+          const permissionEvent = room.recordEvent(
+            MessageType.PERMISSION_CHANGE,
+            payload,
+            session.userId,
+          );
+          room.broadcast(
+            createEnvelope(MessageType.PERMISSION_CHANGE, payload, {
+              msg_id: envelope.msg_id,
+              seq: permissionEvent.seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: permissionEvent.ts,
+            }),
+          );
+        });
+        break;
+      }
+
+      case MessageType.STROKE_BEGIN: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (!this.authorizeCanvasMutation(session, envelope, room)) {
           return;
         }
 
@@ -451,6 +632,7 @@ export class WhiteboardServer {
         );
 
         await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
           if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
 
           const stroke = room.applyStrokeBegin(
@@ -489,15 +671,7 @@ export class WhiteboardServer {
       case MessageType.STROKE_POINTS: {
         const room = this.requireRoom(session, envelope, 'You must join a room first');
         if (!room) return;
-        if (
-          !this.authorize(
-            session,
-            envelope,
-            room,
-            canMutateCanvas(session.role),
-            'Viewer role cannot mutate canvas',
-          )
-        ) {
+        if (!this.authorizeCanvasMutation(session, envelope, room)) {
           return;
         }
 
@@ -507,6 +681,7 @@ export class WhiteboardServer {
         );
 
         await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
           if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
 
           const stroke = room.applyStrokePoints(payload.op_id, payload.strokeId, payload.points);
@@ -544,21 +719,14 @@ export class WhiteboardServer {
       case MessageType.STROKE_END: {
         const room = this.requireRoom(session, envelope, 'You must join a room first');
         if (!room) return;
-        if (
-          !this.authorize(
-            session,
-            envelope,
-            room,
-            canMutateCanvas(session.role),
-            'Viewer role cannot mutate canvas',
-          )
-        ) {
+        if (!this.authorizeCanvasMutation(session, envelope, room)) {
           return;
         }
 
         const payload = validatePayload<StrokeEndPayload>(MessageType.STROKE_END, envelope.payload);
 
         await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
           if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
 
           const stroke = room.applyStrokeEnd(payload.op_id, payload.strokeId, payload.finalPoint);
@@ -619,21 +787,14 @@ export class WhiteboardServer {
       case MessageType.ERASE: {
         const room = this.requireRoom(session, envelope, 'You must join a room first');
         if (!room) return;
-        if (
-          !this.authorize(
-            session,
-            envelope,
-            room,
-            canMutateCanvas(session.role),
-            'Viewer role cannot erase objects',
-          )
-        ) {
+        if (!this.authorizeCanvasMutation(session, envelope, room)) {
           return;
         }
 
         const payload = validatePayload<ErasePayload>(MessageType.ERASE, envelope.payload);
 
         await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
           if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
 
           const { seq } = room.eraseObjects(payload.op_id, payload.objectIds, session.userId);
@@ -696,15 +857,7 @@ export class WhiteboardServer {
       case MessageType.UNDO: {
         const room = this.requireRoom(session, envelope, 'You must join a room first');
         if (!room) return;
-        if (
-          !this.authorize(
-            session,
-            envelope,
-            room,
-            canMutateCanvas(session.role),
-            'Viewer role cannot undo canvas actions',
-          )
-        ) {
+        if (!this.authorizeCanvasMutation(session, envelope, room)) {
           return;
         }
 
@@ -714,6 +867,7 @@ export class WhiteboardServer {
         );
 
         await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
           if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
           const result = room.applyUndo(payload.op_id, payload.target_op_id, session.userId);
           if (!result.accepted || !result.payload || result.seq === undefined) {
@@ -743,15 +897,7 @@ export class WhiteboardServer {
       case MessageType.REDO: {
         const room = this.requireRoom(session, envelope, 'You must join a room first');
         if (!room) return;
-        if (
-          !this.authorize(
-            session,
-            envelope,
-            room,
-            canMutateCanvas(session.role),
-            'Viewer role cannot redo canvas actions',
-          )
-        ) {
+        if (!this.authorizeCanvasMutation(session, envelope, room)) {
           return;
         }
 
@@ -761,6 +907,7 @@ export class WhiteboardServer {
         );
 
         await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
           if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
           const result = room.applyRedo(payload.op_id, payload.target_op_id, session.userId);
           if (!result.accepted || !result.payload || result.seq === undefined) {

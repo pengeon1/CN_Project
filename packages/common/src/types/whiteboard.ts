@@ -156,5 +156,6 @@ export interface RoomSnapshot {
   participants: Participant[];
   chatHistory: ChatMessage[];
   locked: boolean;
+  allowNameChanges?: boolean;
   createdAt: number;
 }

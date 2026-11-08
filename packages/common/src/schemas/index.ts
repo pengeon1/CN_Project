@@ -33,8 +33,10 @@ import {
   LeaveRoomPayloadSchema,
   ParticipantJoinedPayloadSchema,
   ParticipantLeftPayloadSchema,
+  ParticipantRenamedPayloadSchema,
   ParticipantListPayloadSchema,
   PermissionChangePayloadSchema,
+  UpdateUsernamePayloadSchema,
 } from './room.schema.js';
 import {
   LoadStatePayloadSchema,
@@ -64,7 +66,9 @@ export const PayloadSchemaMap: Record<MessageType, z.ZodTypeAny> = {
   [MessageType.ROOM_STATE]: RoomStatePayloadSchema,
   [MessageType.PARTICIPANT_JOINED]: ParticipantJoinedPayloadSchema,
   [MessageType.PARTICIPANT_LEFT]: ParticipantLeftPayloadSchema,
+  [MessageType.PARTICIPANT_RENAMED]: ParticipantRenamedPayloadSchema,
   [MessageType.PARTICIPANT_LIST]: ParticipantListPayloadSchema,
+  [MessageType.UPDATE_USERNAME]: UpdateUsernamePayloadSchema,
   [MessageType.PERMISSION_CHANGE]: PermissionChangePayloadSchema,
   [MessageType.STROKE_BEGIN]: StrokeBeginPayloadSchema,
   [MessageType.STROKE_POINTS]: StrokePointsPayloadSchema,

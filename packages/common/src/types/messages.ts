@@ -28,7 +28,9 @@ export const MessageType = {
   ROOM_STATE: 'ROOM_STATE',
   PARTICIPANT_JOINED: 'PARTICIPANT_JOINED',
   PARTICIPANT_LEFT: 'PARTICIPANT_LEFT',
+  PARTICIPANT_RENAMED: 'PARTICIPANT_RENAMED',
   PARTICIPANT_LIST: 'PARTICIPANT_LIST',
+  UPDATE_USERNAME: 'UPDATE_USERNAME',
   PERMISSION_CHANGE: 'PERMISSION_CHANGE',
 
   // Real-time Drawing & Whiteboard Operations
@@ -131,6 +133,7 @@ export interface CreateRoomPayload {
   roomName: string;
   username: string;
   password?: string;
+  allowNameChanges?: boolean;
 }
 
 export interface JoinRoomPayload {
@@ -161,14 +164,25 @@ export interface ParticipantLeftPayload {
   reason?: string;
 }
 
+export interface ParticipantRenamedPayload {
+  userId: string;
+  username: string;
+}
+
+export interface UpdateUsernamePayload {
+  username: string;
+}
+
 export interface ParticipantListPayload {
   participants: Participant[];
 }
 
 export interface PermissionChangePayload {
-  targetUserId: string;
+  targetUserId?: string;
   newRole?: Role;
   lockRoom?: boolean;
+  kick?: boolean;
+  reason?: string;
 }
 
 export interface StrokeBeginPayload {

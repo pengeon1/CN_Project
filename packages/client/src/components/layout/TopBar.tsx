@@ -8,6 +8,8 @@ import React from 'react';
 import {
   ArrowLeft,
   Download,
+  Lock,
+  LockOpen,
   LogIn,
   MessageSquare,
   Moon,
@@ -37,6 +39,7 @@ export const TopBar: React.FC = () => {
     requestSaveState,
     requestLoadState,
     exportBoard,
+    sendPermissionChange,
   } = useWhiteboardStore();
 
   const getInitials = (name: string): string => {
@@ -94,6 +97,21 @@ export const TopBar: React.FC = () => {
           <>
             {roomInfo.isHost && (
               <>
+                <button
+                  onClick={() => sendPermissionChange({ lockRoom: !roomInfo.locked })}
+                  title={
+                    roomInfo.locked ? 'Unlock room for participants' : 'Lock room against edits'
+                  }
+                  aria-label={roomInfo.locked ? 'Unlock room' : 'Lock room'}
+                  className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+                >
+                  {roomInfo.locked ? (
+                    <Lock className="h-4 w-4" />
+                  ) : (
+                    <LockOpen className="h-4 w-4" />
+                  )}
+                  {roomInfo.locked ? 'Unlock' : 'Lock'}
+                </button>
                 <button
                   onClick={() => void requestSaveState()}
                   title="Save room to the server"

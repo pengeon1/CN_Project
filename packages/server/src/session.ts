@@ -64,6 +64,10 @@ export class ClientSession extends EventEmitter {
     return `${this.socket.remoteAddress ?? 'unknown'}:${this.socket.remotePort ?? 0}`;
   }
 
+  public get remoteIp(): string {
+    return this.socket.remoteAddress ?? 'unknown';
+  }
+
   /**
    * True once the session has been torn down and can no longer send or receive.
    */

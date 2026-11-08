@@ -4,7 +4,16 @@
  */
 
 import React, { useState } from 'react';
-import { AlertCircle, KeyRound, Loader2, LogIn, Network, PlusCircle, X } from 'lucide-react';
+import {
+  AlertCircle,
+  ChevronDown,
+  KeyRound,
+  Loader2,
+  LogIn,
+  Network,
+  PlusCircle,
+  X,
+} from 'lucide-react';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
 export const ConnectDialog: React.FC = () => {
@@ -24,6 +33,8 @@ export const ConnectDialog: React.FC = () => {
   const [roomName, setRoomName] = useState('Project Brainstorm');
   const [roomCode, setRoomCode] = useState('');
   const [password, setPassword] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [allowNameChanges, setAllowNameChanges] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!connectModalOpen) {
@@ -43,6 +54,7 @@ export const ConnectDialog: React.FC = () => {
       roomName: tab === 'create' ? roomName.trim() : undefined,
       roomCode: tab === 'join' ? roomCode.trim().toUpperCase() : undefined,
       password: password.trim() || undefined,
+      allowNameChanges: tab === 'create' ? allowNameChanges : undefined,
     });
     setIsSubmitting(false);
   };
@@ -141,17 +153,50 @@ export const ConnectDialog: React.FC = () => {
 
           {/* Host Tab Specifics */}
           {tab === 'create' && (
-            <div>
-              <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                Session Title
-              </label>
-              <input
-                type="text"
-                value={roomName}
-                onChange={(e) => setRoomName(e.target.value)}
-                placeholder="e.g. Brainstorming"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 focus:border-blue-500 focus:outline-none"
-              />
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                  Session Title
+                </label>
+                <input
+                  type="text"
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
+                  placeholder="e.g. Brainstorming"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/40">
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen((open) => !open)}
+                  aria-expanded={settingsOpen}
+                  className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-slate-300"
+                >
+                  Change settings
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${settingsOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {settingsOpen && (
+                  <label className="flex cursor-pointer items-start gap-2.5 border-t border-slate-800 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allowNameChanges}
+                      onChange={(event) => setAllowNameChanges(event.currentTarget.checked)}
+                      className="mt-0.5 accent-blue-500"
+                    />
+                    <span>
+                      <span className="block text-xs font-medium text-slate-200">
+                        Allow participants to change their names
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        Participants can rename themselves from the participants list.
+                      </span>
+                    </span>
+                  </label>
+                )}
+              </div>
             </div>
           )}
 

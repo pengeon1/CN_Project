@@ -178,7 +178,8 @@ Requests creation of a new collaborative whiteboard session.
   "payload": {
     "roomName": "Network Architecture Brainstorm",
     "username": "Alice",
-    "password": "labpassword123"
+    "password": "labpassword123",
+    "allowNameChanges": true
   }
 }
 ```
@@ -289,6 +290,7 @@ Sent to a newly joined client containing the entire materialized canvas snapshot
       }
     ],
     "locked": false,
+    "allowNameChanges": true,
     "createdAt": 1730644805000
   }
 }
@@ -340,6 +342,19 @@ Broadcast when a participant disconnects or leaves.
 }
 ```
 
+#### `UPDATE_USERNAME` / `PARTICIPANT_RENAMED`
+
+When the host enables participant name changes in the room's creation settings, participants can request to change their display name during the session. The server validates the new name and broadcasts it as a sequenced event so connected clients and reconnecting clients update consistently. The setting is stored with the room; when disabled, the server rejects name-change requests.
+
+```json
+{
+  "type": "UPDATE_USERNAME",
+  "payload": { "username": "Sketcher" }
+}
+```
+
+The server broadcasts `PARTICIPANT_RENAMED` with `{ "userId": "<participant UUID>", "username": "Sketcher" }`.
+
 #### `PARTICIPANT_LIST` (Server -> Client)
 
 Provides the full list of participants upon request.
@@ -369,7 +384,7 @@ Provides the full list of participants upon request.
 
 #### `PERMISSION_CHANGE` (Client -> Server -> Broadcast)
 
-Host updates a participant's role (`HOST`, `EDITOR`, `VIEWER`) or room lock status.
+The host can change a participant between `EDITOR` and `VIEWER`, lock or unlock the room, or kick a participant. Host ownership is transferred by the server when the host leaves; clients cannot assign the `HOST` role directly. Each request performs one change:
 
 ```json
 {
@@ -382,11 +397,12 @@ Host updates a participant's role (`HOST`, `EDITOR`, `VIEWER`) or room lock stat
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "targetUserId": "661f9511-f3ac-42e5-b827-557766551111",
-    "newRole": "VIEWER",
-    "lockRoom": false
+    "newRole": "VIEWER"
   }
 }
 ```
+
+For a lock toggle, send `{ "lockRoom": true }` or `{ "lockRoom": false }`. To remove a participant, send `{ "targetUserId": "<participant UUID>", "kick": true, "reason": "Removed by host" }`. A kicked session token cannot resume in that room.
 
 ---
 
@@ -820,13 +836,15 @@ Tells a client what became of one of its messages, identified by `target_msg_id`
 
 When an error is the response to a specific client message, `details.target_msg_id` identifies it. A client uses this to stop retransmitting an operation the server will never accept (§5.6).
 
-| Code              | Meaning                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------- |
-| `NOT_IN_ROOM`     | The message needs a room but the connection has not joined one.                                         |
-| `FORBIDDEN`       | The sender's role does not permit the action (e.g. a `VIEWER` drawing, a non-host clearing the canvas). |
-| `JOIN_FAILED`     | The room does not exist, is locked, or the password is wrong.                                           |
-| `INVALID_PAYLOAD` | The payload failed schema validation.                                                                   |
-| `INTERNAL_ERROR`  | Unexpected server-side failure.                                                                         |
+| Code                        | Meaning                                                                                              |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `NOT_IN_ROOM`               | The message needs a room but the connection has not joined one.                                      |
+| `FORBIDDEN`                 | The sender's role or room lock does not permit the action.                                           |
+| `JOIN_FAILED`               | The room does not exist, is locked, the password is wrong, or the IP join-attempt limit was reached. |
+| `INVALID_PERMISSION_CHANGE` | The requested role change, lock operation, or kick is not allowed.                                   |
+| `NAME_CHANGE_DISABLED`      | The room host has disabled participant name changes.                                                 |
+| `INVALID_PAYLOAD`           | The payload failed schema validation.                                                                |
+| `INTERNAL_ERROR`            | Unexpected server-side failure.                                                                      |
 
 ---
 
@@ -1017,10 +1035,10 @@ The behaviour above is exercised by automated tests, including an end-to-end sui
 1. **Room Authentication**:
    - Rooms are identified by a 6-character code (`ROOM_CODE_ALPHABET`).
    - Rooms optionally require a password. Passwords are never stored in plaintext; the server computes a salted cryptographic hash using Node.js built-in `crypto.scrypt`.
-   - Failed authentication attempts are rate-limited per remote IP address to defend against brute-force attacks.
+   - Failed room-join attempts are limited to five per remote IP in any rolling one-minute window to defend against brute-force attacks.
 2. **Role Enforcement**:
    - **`HOST`**: Full control. Only the host can execute `CLEAR_CANVAS`, `PERMISSION_CHANGE` (promote/demote/kick), lock the room, and trigger server-side persistence (`SAVE_STATE`, `LOAD_STATE`).
-   - **`EDITOR`**: Can draw, modify own objects, create shapes, and chat.
+   - **`EDITOR`**: Can draw, modify own objects, create shapes, and chat unless the host has locked the room.
    - **`VIEWER`**: Read-only observer. Cannot send canvas mutations. If a `VIEWER` client emits a drawing operation, the server rejects it with an `ERROR` message (`FORBIDDEN`).
 3. **Zero-Trust Input Validation**:
    - The server **never** trusts incoming client data.

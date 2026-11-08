@@ -27,6 +27,7 @@ describe('Client UI & Store Suite', () => {
       connectionError: null,
       roomInfo: null,
       persistenceStatus: null,
+      accessNotice: null,
       currentUser: null,
       participants: [],
       chatMessages: [],
@@ -41,6 +42,7 @@ describe('Client UI & Store Suite', () => {
       rightPanelTab: 'chat',
       shareModalOpen: false,
       connectModalOpen: false,
+      profileSettingsOpen: false,
       isDarkTheme: false,
       objects: {},
       liveLocalStroke: null,
@@ -205,6 +207,151 @@ describe('Client UI & Store Suite', () => {
     expect(state.participants).toHaveLength(0);
     expect(state.chatMessages).toHaveLength(2);
     expect(state.chatMessages[1]!.text).toContain('Bob left the session');
+  });
+
+  it('notifies a participant when changed to viewer and switches to the select tool', () => {
+    const userId = generateUuid();
+    useWhiteboardStore.setState({
+      currentUser: { id: userId, username: 'Alice', color: '#18A0FB', role: Role.EDITOR },
+      roomInfo: { code: 'VIEW01', name: 'Board', isHost: false, locked: false },
+      participants: [
+        {
+          id: userId,
+          username: 'Alice',
+          role: Role.EDITOR,
+          color: '#18A0FB',
+          joinedAt: Date.now(),
+        },
+      ],
+      activeTool: 'pen',
+      lastAppliedSeq: 0,
+    });
+
+    useWhiteboardStore
+      .getState()
+      .handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.PERMISSION_CHANGE,
+          { targetUserId: userId, newRole: Role.VIEWER },
+          { room: 'VIEW01', user_id: userId, seq: 1 },
+        ),
+      );
+
+    const state = useWhiteboardStore.getState();
+    expect(state.currentUser?.role).toBe(Role.VIEWER);
+    expect(state.participants[0]?.role).toBe(Role.VIEWER);
+    expect(state.activeTool).toBe('select');
+    expect(state.accessNotice).toMatchObject({ title: 'View-only access' });
+
+    state.setActiveTool('pen');
+    expect(useWhiteboardStore.getState().activeTool).toBe('select');
+    state.setActiveTool('eraser');
+    expect(useWhiteboardStore.getState().activeTool).toBe('select');
+  });
+
+  it('updates participant names and broadcasts the name-change request', async () => {
+    const userId = generateUuid();
+    const sendMessage = vi.fn().mockResolvedValue(true);
+    const api: ElectronWhiteboardAPI = {
+      platform: 'test',
+      connect: async () => ({ success: true }),
+      disconnect: async () => undefined,
+      sendMessage,
+      onMessage: () => () => undefined,
+      onStatus: () => () => undefined,
+      exportBoard: async () => ({ success: true }),
+    };
+    vi.stubGlobal('window', { electronAPI: api });
+    useWhiteboardStore.setState({
+      currentUser: { id: userId, username: 'Alice', color: '#18A0FB', role: Role.HOST },
+      roomInfo: {
+        code: 'NAME01',
+        name: 'Board',
+        isHost: true,
+        locked: false,
+        allowNameChanges: true,
+      },
+      participants: [
+        {
+          id: userId,
+          username: 'Alice',
+          role: Role.HOST,
+          color: '#18A0FB',
+          joinedAt: Date.now(),
+        },
+      ],
+      profileSettingsOpen: true,
+    });
+
+    useWhiteboardStore.getState().updateUsername('  Sketcher  ');
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: MessageType.UPDATE_USERNAME,
+        payload: { username: 'Sketcher' },
+      }),
+    );
+    expect(useWhiteboardStore.getState().profileSettingsOpen).toBe(false);
+
+    useWhiteboardStore
+      .getState()
+      .handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.PARTICIPANT_RENAMED,
+          { userId, username: 'Sketcher' },
+          { room: 'NAME01', user_id: userId, seq: 1 },
+        ),
+      );
+    const state = useWhiteboardStore.getState();
+    expect(state.currentUser?.username).toBe('Sketcher');
+    expect(state.participants[0]?.username).toBe('Sketcher');
+    expect(state.chatMessages.at(-1)?.text).toContain('changed their name to Sketcher');
+  });
+
+  it('disconnects and clears room state when kicked while keeping a notice visible', async () => {
+    const userId = generateUuid();
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    const api: ElectronWhiteboardAPI = {
+      platform: 'test',
+      connect: async () => ({ success: true }),
+      disconnect,
+      sendMessage: async () => true,
+      onMessage: () => () => undefined,
+      onStatus: () => () => undefined,
+      exportBoard: async () => ({ success: true }),
+    };
+    vi.stubGlobal('window', { electronAPI: api });
+    useWhiteboardStore.setState({
+      currentUser: { id: userId, username: 'Alice', color: '#18A0FB', role: Role.EDITOR },
+      roomInfo: { code: 'KICK01', name: 'Board', isHost: false, locked: false },
+      participants: [],
+      chatMessages: [],
+      objects: {},
+      activeTool: 'pen',
+      lastAppliedSeq: 0,
+    });
+
+    useWhiteboardStore
+      .getState()
+      .handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.PERMISSION_CHANGE,
+          { targetUserId: userId, kick: true, reason: 'Policy violation' },
+          { room: 'KICK01', user_id: userId, seq: 1 },
+        ),
+      );
+    await Promise.resolve();
+
+    const state = useWhiteboardStore.getState();
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(state.connectionStatus).toBe('disconnected');
+    expect(state.roomInfo).toBeNull();
+    expect(state.currentUser).toBeNull();
+    expect(state.accessNotice).toMatchObject({
+      title: 'Removed from the room',
+      message: expect.stringContaining('Policy violation'),
+    });
   });
 
   it('manages local stroke drawing lifecycle optimistically', () => {

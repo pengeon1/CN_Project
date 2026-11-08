@@ -27,6 +27,7 @@ import {
   type ParticipantJoinedPayload,
   type ParticipantLeftPayload,
   type ParticipantListPayload,
+  type ParticipantRenamedPayload,
   type PermissionChangePayload,
   type Point,
   type RemoteCursor,
@@ -41,6 +42,7 @@ import {
   type StrokePointsPayload,
   type UndoPayload,
   type RedoPayload,
+  type UpdateUsernamePayload,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
 import type { ConnectionStatus, ConnectOptions } from '../types/ipc.js';
@@ -69,6 +71,11 @@ export interface ChatEntry {
   isSystem?: boolean;
 }
 
+export interface AccessNotice {
+  title: string;
+  message: string;
+}
+
 export interface WhiteboardState {
   // Connection & Room state
   connectionStatus: ConnectionStatus;
@@ -79,9 +86,11 @@ export interface WhiteboardState {
     name: string;
     isHost: boolean;
     locked: boolean;
+    allowNameChanges?: boolean;
     createdAt?: number;
   } | null;
   persistenceStatus: string | null;
+  accessNotice: AccessNotice | null;
   currentUser: { id: string; username: string; color: string; role: Role } | null;
   participants: Participant[];
 
@@ -113,6 +122,7 @@ export interface WhiteboardState {
   rightPanelTab: 'chat' | 'participants';
   shareModalOpen: boolean;
   connectModalOpen: boolean;
+  profileSettingsOpen: boolean;
   clearModalOpen: boolean;
   isDarkTheme: boolean;
 
@@ -128,9 +138,13 @@ export interface WhiteboardState {
   setRightPanelTab: (tab: 'chat' | 'participants') => void;
   setShareModalOpen: (open: boolean) => void;
   setConnectModalOpen: (open: boolean) => void;
+  setProfileSettingsOpen: (open: boolean) => void;
   setClearModalOpen: (open: boolean) => void;
+  dismissAccessNotice: () => void;
   toggleTheme: () => void;
   sendChatMessage: (text: string) => void;
+  sendPermissionChange: (payload: PermissionChangePayload) => void;
+  updateUsername: (username: string) => void;
   undoLastAction: () => void;
   redoLastAction: () => void;
   connectToServer: (options: ConnectOptions) => Promise<boolean>;
@@ -262,6 +276,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   serverInfo: { host: '127.0.0.1', port: 4000 },
   roomInfo: null,
   persistenceStatus: null,
+  accessNotice: null,
   currentUser: null,
   participants: [],
 
@@ -295,6 +310,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   rightPanelTab: 'chat',
   shareModalOpen: false,
   connectModalOpen: false,
+  profileSettingsOpen: false,
   clearModalOpen: false,
   isDarkTheme: false,
 
@@ -303,6 +319,11 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   setActiveTool: (tool) => {
+    const { currentUser, roomInfo } = get();
+    const canEdit =
+      !currentUser ||
+      (canMutateCanvas(currentUser.role) && (!roomInfo?.locked || isHost(currentUser.role)));
+    if (tool !== 'select' && !canEdit) return;
     set({ activeTool: tool });
   },
 
@@ -350,8 +371,16 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     set({ connectModalOpen: open });
   },
 
+  setProfileSettingsOpen: (open) => {
+    set({ profileSettingsOpen: open });
+  },
+
   setClearModalOpen: (open) => {
     set({ clearModalOpen: open });
+  },
+
+  dismissAccessNotice: () => {
+    set({ accessNotice: null });
   },
 
   toggleTheme: () => {
@@ -394,6 +423,77 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         chatMessages: [...state.chatMessages, localEntry],
       }));
     }
+  },
+
+  sendPermissionChange: (payload) => {
+    const { currentUser, roomInfo } = get();
+    if (!currentUser || !roomInfo || !isHost(currentUser.role)) return;
+
+    const api = getElectronAPI();
+    if (!api) {
+      set({ persistenceStatus: 'Room controls are available in the desktop app.' });
+      return;
+    }
+
+    void api
+      .sendMessage(
+        createEnvelope(MessageType.PERMISSION_CHANGE, payload, {
+          room: roomInfo.code,
+          user_id: currentUser.id,
+        }),
+      )
+      .catch((error: unknown) => {
+        set({
+          persistenceStatus:
+            error instanceof Error ? error.message : 'Could not send the room management request.',
+        });
+      });
+  },
+
+  updateUsername: (username) => {
+    const trimmedUsername = username.trim();
+    const { currentUser, roomInfo, participants } = get();
+    if (
+      !currentUser ||
+      !roomInfo?.allowNameChanges ||
+      !trimmedUsername ||
+      trimmedUsername === currentUser.username
+    ) {
+      return;
+    }
+
+    const api = getElectronAPI();
+    if (!api) {
+      set({
+        currentUser: { ...currentUser, username: trimmedUsername },
+        participants: participants.map((participant) =>
+          participant.id === currentUser.id
+            ? { ...participant, username: trimmedUsername }
+            : participant,
+        ),
+        profileSettingsOpen: false,
+      });
+      return;
+    }
+
+    void api
+      .sendMessage(
+        createEnvelope(
+          MessageType.UPDATE_USERNAME,
+          { username: trimmedUsername } satisfies UpdateUsernamePayload,
+          { room: roomInfo.code, user_id: currentUser.id },
+        ),
+      )
+      .then((sent) => {
+        if (sent) set({ profileSettingsOpen: false });
+        else set({ persistenceStatus: 'Could not send the name change request.' });
+      })
+      .catch((error: unknown) => {
+        set({
+          persistenceStatus:
+            error instanceof Error ? error.message : 'Could not send the name change request.',
+        });
+      });
   },
 
   undoLastAction: () => {
@@ -443,7 +543,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   connectToServer: async (options) => {
-    set({ connectionStatus: 'connecting', connectionError: null });
+    set({ connectionStatus: 'connecting', connectionError: null, accessNotice: null });
 
     const api = getElectronAPI();
     if (api) {
@@ -468,11 +568,13 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
       set({
         connectionStatus: 'connected',
+        accessNotice: null,
         roomInfo: {
           code: mockCode,
           name: options.roomName || 'Demo Whiteboard',
           isHost: options.action === 'create',
           locked: false,
+          allowNameChanges: options.action === 'create' && options.allowNameChanges === true,
           createdAt: Date.now(),
         },
         currentUser: mockUser,
@@ -501,6 +603,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       roomInfo: null,
       persistenceStatus: null,
       currentUser: null,
+      accessNotice: null,
       participants: [],
       chatMessages: [],
       objects: {},
@@ -800,6 +903,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             name: payload.roomName,
             isHost: myParticipant?.role === Role.HOST,
             locked: payload.locked,
+            allowNameChanges: payload.allowNameChanges ?? false,
             createdAt: payload.createdAt,
           },
           currentUser: myParticipant
@@ -840,10 +944,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
       case MessageType.ERROR: {
         const payload = envelope.payload as { message?: string };
-        const status = get().persistenceStatus;
-        if (status?.startsWith('Saving') || status?.startsWith('Loading')) {
-          set({ persistenceStatus: payload.message ?? 'The room persistence request failed.' });
-        }
+        set({ persistenceStatus: payload.message ?? 'The server rejected the request.' });
         break;
       }
 
@@ -1014,8 +1115,99 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         break;
       }
 
+      case MessageType.PARTICIPANT_RENAMED: {
+        const payload = envelope.payload as ParticipantRenamedPayload;
+        set((state) => ({
+          participants: state.participants.map((participant) =>
+            participant.id === payload.userId
+              ? { ...participant, username: payload.username }
+              : participant,
+          ),
+          currentUser:
+            state.currentUser?.id === payload.userId
+              ? { ...state.currentUser, username: payload.username }
+              : state.currentUser,
+          remoteCursors:
+            state.remoteCursors[payload.userId] !== undefined
+              ? {
+                  ...state.remoteCursors,
+                  [payload.userId]: {
+                    ...state.remoteCursors[payload.userId]!,
+                    username: payload.username,
+                  },
+                }
+              : state.remoteCursors,
+          chatMessages: [
+            ...state.chatMessages,
+            {
+              id: generateUuid(),
+              userId: payload.userId,
+              username: payload.username,
+              color:
+                state.participants.find((participant) => participant.id === payload.userId)
+                  ?.color ?? '#94A3B8',
+              text: `${state.participants.find((participant) => participant.id === payload.userId)?.username ?? 'A participant'} changed their name to ${payload.username}.`,
+              ts: Date.now(),
+              isSystem: true,
+            },
+          ],
+        }));
+        break;
+      }
+
       case MessageType.PERMISSION_CHANGE: {
         const payload = envelope.payload as PermissionChangePayload;
+        const { currentUser } = get();
+        if (payload.kick && payload.targetUserId === currentUser?.id) {
+          const api = getElectronAPI();
+          if (api) {
+            void api.disconnect().catch((error: unknown) => {
+              set({
+                connectionError:
+                  error instanceof Error ? error.message : 'Could not leave the kicked session.',
+              });
+            });
+          }
+          set({
+            accessNotice: {
+              title: 'Removed from the room',
+              message: payload.reason
+                ? `The host removed you from this room: ${payload.reason}`
+                : 'The host removed you from this room.',
+            },
+            connectionStatus: 'disconnected',
+            roomInfo: null,
+            persistenceStatus: null,
+            currentUser: null,
+            participants: [],
+            chatMessages: [],
+            objects: {},
+            liveLocalStroke: null,
+            remoteCursors: {},
+            lastAppliedSeq: 0,
+            undoStack: [],
+            redoStack: [],
+            activeTool: 'select',
+          });
+          break;
+        }
+
+        if (
+          currentUser &&
+          payload.targetUserId === currentUser.id &&
+          payload.newRole === Role.VIEWER &&
+          currentUser.role !== Role.VIEWER
+        ) {
+          set({
+            accessNotice: {
+              title: 'View-only access',
+              message:
+                'The host changed your role to Viewer. You can view the board but cannot edit it.',
+            },
+            activeTool: 'select',
+          });
+        }
+
         set((state) => {
           const updatedParticipants = state.participants.map((p) =>
             p.id === payload.targetUserId && payload.newRole ? { ...p, role: payload.newRole } : p,
@@ -1029,6 +1221,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           return {
             participants: updatedParticipants,
             currentUser: updatedCurrent,
+            activeTool:
+              payload.targetUserId === state.currentUser?.id && payload.newRole === Role.VIEWER
+                ? 'select'
+                : state.activeTool,
             roomInfo: state.roomInfo
               ? {
                   ...state.roomInfo,
@@ -1198,13 +1394,32 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         } else if (payload.operations && payload.operations.length > 0) {
           set((state) => {
             const nextObjects = { ...state.objects };
+            const nextParticipants = [...state.participants];
+            let nextCurrentUser = state.currentUser;
             for (const op of payload.operations!) {
               if (op.seq > state.lastAppliedSeq) {
                 applySequencedOpToObjects(nextObjects, op);
+                if (op.type === MessageType.PARTICIPANT_RENAMED) {
+                  const renamed = op.payload as ParticipantRenamedPayload;
+                  const participantIndex = nextParticipants.findIndex(
+                    (participant) => participant.id === renamed.userId,
+                  );
+                  if (participantIndex !== -1) {
+                    nextParticipants[participantIndex] = {
+                      ...nextParticipants[participantIndex]!,
+                      username: renamed.username,
+                    };
+                  }
+                  if (nextCurrentUser?.id === renamed.userId) {
+                    nextCurrentUser = { ...nextCurrentUser, username: renamed.username };
+                  }
+                }
               }
             }
             return {
               objects: nextObjects,
+              participants: nextParticipants,
+              currentUser: nextCurrentUser,
               lastAppliedSeq: Math.max(state.lastAppliedSeq, payload.to_seq),
             };
           });

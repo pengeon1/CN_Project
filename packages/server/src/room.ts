@@ -90,6 +90,20 @@ export class Room {
    * evicted once {@link MAX_PROCESSED_OPS} is exceeded.
    */
   private processedOps: Map<string, number> = new Map();
+  /**
+   * Per-user undo stacks, ordered from oldest to newest. Only operations authored by the same user
+   * are eligible for that user's undo/redo cycle.
+   */
+  private userUndoStacks: Map<string, string[]> = new Map();
+  private userRedoStacks: Map<string, string[]> = new Map();
+  /**
+   * Snapshot of the board state before a user-authored mutation was applied. Used to resolve the
+   * target of a compensating undo operation and to reapply it during redo.
+   */
+  private undoSnapshots: Map<string, WhiteboardObject | Record<string, WhiteboardObject> | null> =
+    new Map();
+  private redoSnapshots: Map<string, WhiteboardObject | Record<string, WhiteboardObject> | null> =
+    new Map();
   private colorIndex: number = 0;
   private serialQueue: Promise<void> = Promise.resolve();
   private logger: Logger;
@@ -248,6 +262,37 @@ export class Room {
     this.processedOps.set(opId, seq);
   }
 
+  private cloneSnapshot<T>(value: T): T {
+    return structuredClone(value);
+  }
+
+  private snapshotObjectMap(): Record<string, WhiteboardObject> {
+    return Object.fromEntries(
+      Array.from(this.objects.entries()).map(([id, object]) => [id, this.cloneSnapshot(object)]),
+    );
+  }
+
+  private rememberUserMutation(userId: string, opId: string): void {
+    if (!userId) return;
+    const prior = this.userUndoStacks.get(userId) ?? [];
+    if (!prior.includes(opId)) {
+      prior.push(opId);
+      this.userUndoStacks.set(userId, prior);
+    }
+    this.userRedoStacks.set(userId, []);
+  }
+
+  private getTargetObjectIdFromOperation(op: SequencedOperation): string | null {
+    if (!op.payload || typeof op.payload !== 'object') return null;
+    const record = op.payload as Record<string, unknown>;
+    if (typeof record.strokeId === 'string') return record.strokeId;
+    if (typeof record.id === 'string') return record.id;
+    if (typeof record.object === 'object' && record.object && 'id' in record.object) {
+      return String((record.object as { id?: string }).id ?? null);
+    }
+    return null;
+  }
+
   /**
    * Assigns the next seq to an accepted operation, remembers its op_id and appends it to the log.
    *
@@ -334,6 +379,7 @@ export class Room {
       points: [startPoint],
       isComplete: false,
     };
+    this.undoSnapshots.set(opId, this.cloneSnapshot(existing ?? null));
     stroke.seq = this.commit(
       opId,
       authorId,
@@ -342,6 +388,7 @@ export class Room {
       ts,
     );
     this.objects.set(strokeId, stroke);
+    this.rememberUserMutation(authorId, opId);
     return stroke;
   }
 
@@ -361,6 +408,7 @@ export class Room {
       return null;
     }
 
+    this.undoSnapshots.set(opId, this.cloneSnapshot(obj));
     const startIndex = obj.points.length;
     const ts = Date.now();
     obj.points.push(...points);
@@ -372,7 +420,6 @@ export class Room {
       { op_id: opId, strokeId, points, startIndex },
       ts,
     );
-
     return obj;
   }
 
@@ -390,6 +437,7 @@ export class Room {
       return null;
     }
 
+    this.undoSnapshots.set(opId, this.cloneSnapshot(obj));
     const startIndex = obj.points.length;
     const ts = Date.now();
     if (finalPoint) {
@@ -409,7 +457,6 @@ export class Room {
       },
       ts,
     );
-
     return obj;
   }
 
@@ -430,6 +477,14 @@ export class Room {
     if (priorSeq !== undefined) {
       return { seq: priorSeq, erasedIds: [] };
     }
+
+    const snapshot = Object.fromEntries(
+      objectIds
+        .filter((id) => this.objects.has(id))
+        .map((id) => [id, this.cloneSnapshot(this.objects.get(id)!)]),
+    );
+    this.undoSnapshots.set(opId, snapshot);
+
     const erasedIds: string[] = [];
     for (const id of objectIds) {
       if (this.objects.has(id)) {
@@ -444,6 +499,7 @@ export class Room {
       { op_id: opId, objectIds },
       Date.now(),
     );
+    this.rememberUserMutation(userId, opId);
 
     return { seq, erasedIds };
   }
@@ -457,6 +513,7 @@ export class Room {
     if (priorSeq !== undefined) {
       return { seq: priorSeq };
     }
+    this.undoSnapshots.set(opId, this.snapshotObjectMap());
     this.objects.clear();
     const seq = this.commit(
       opId,
@@ -465,10 +522,181 @@ export class Room {
       { op_id: opId },
       Date.now(),
     );
+    this.rememberUserMutation(userId || this.hostUserId, opId);
 
     this.recordSystemMessage('Whiteboard canvas was cleared by the room host.');
 
     return { seq };
+  }
+
+  /**
+   * Applies a user-scoped undo by removing the target op from the live canvas state. This does not
+   * rewrite the authoritative history; instead it emits a compensating UNDO op that is sequenced and
+   * broadcast to every peer, matching the protocol contract.
+   */
+  public applyUndo(
+    opId: string,
+    targetOpId: string,
+    userId: string,
+  ): {
+    accepted: boolean;
+    seq?: number;
+    message?: string;
+    payload?: {
+      op_id: string;
+      target_op_id: string;
+      removeIds: string[];
+      restoreObjects: WhiteboardObject[];
+    };
+  } {
+    const undoStack = this.userUndoStacks.get(userId) ?? [];
+    if (undoStack[undoStack.length - 1] !== targetOpId) {
+      return { accepted: false, message: 'Only the most recent operation can be undone.' };
+    }
+
+    const target = this.operationsLog.find((op) => op.op_id === targetOpId);
+    if (!target) {
+      return { accepted: false, message: 'The target operation is no longer available.' };
+    }
+
+    if (target.userId !== userId) {
+      return {
+        accepted: false,
+        message: 'Undo can only target operations authored by the current user.',
+      };
+    }
+
+    const objectId = this.getTargetObjectIdFromOperation(target);
+    const targetSnapshot = objectId ? this.objects.get(objectId) : undefined;
+    if (
+      target.type !== MessageType.CLEAR_CANVAS &&
+      target.type !== MessageType.ERASE &&
+      objectId &&
+      !targetSnapshot
+    ) {
+      return {
+        accepted: false,
+        message: 'The target has already been removed or cleared by another action.',
+      };
+    }
+
+    const removeIds: string[] = [];
+    const restoreObjects: WhiteboardObject[] = [];
+    if (target.type === MessageType.CLEAR_CANVAS) {
+      const snapshot = (this.undoSnapshots.get(targetOpId) ?? {}) as Record<
+        string,
+        WhiteboardObject
+      >;
+      this.redoSnapshots.set(targetOpId, snapshot);
+      for (const [id, object] of Object.entries(snapshot)) {
+        this.objects.set(id, this.cloneSnapshot(object));
+        restoreObjects.push(this.cloneSnapshot(object));
+      }
+    } else if (target.type === MessageType.ERASE) {
+      const snapshot = (this.undoSnapshots.get(targetOpId) ?? {}) as Record<
+        string,
+        WhiteboardObject
+      >;
+      this.redoSnapshots.set(targetOpId, snapshot);
+      for (const [id, object] of Object.entries(snapshot)) {
+        if (!this.objects.has(id)) {
+          this.objects.set(id, this.cloneSnapshot(object));
+          restoreObjects.push(this.cloneSnapshot(object));
+        }
+      }
+    } else if (objectId) {
+      const snapshot = this.objects.get(objectId) ?? this.undoSnapshots.get(targetOpId);
+      this.redoSnapshots.set(targetOpId, snapshot ?? null);
+      this.objects.delete(objectId);
+      removeIds.push(objectId);
+    } else {
+      return { accepted: false, message: 'This operation cannot be undone.' };
+    }
+
+    this.userUndoStacks.set(
+      userId,
+      (this.userUndoStacks.get(userId) ?? []).filter((id) => id !== targetOpId),
+    );
+    const redoStack = this.userRedoStacks.get(userId) ?? [];
+    if (!redoStack.includes(targetOpId)) {
+      redoStack.push(targetOpId);
+      this.userRedoStacks.set(userId, redoStack);
+    }
+
+    const payload = { op_id: opId, target_op_id: targetOpId, removeIds, restoreObjects };
+    const seq = this.commit(opId, userId, MessageType.UNDO, payload, Date.now());
+    return { accepted: true, seq, payload };
+  }
+
+  /**
+   * Reapplies the last undone operation for the current user. This restores the object snapshot and
+   * re-enables that target op to participate in the normal undo cycle.
+   */
+  public applyRedo(
+    opId: string,
+    targetOpId: string,
+    userId: string,
+  ): {
+    accepted: boolean;
+    seq?: number;
+    message?: string;
+    payload?: {
+      op_id: string;
+      target_op_id: string;
+      removeIds: string[];
+      restoreObjects: WhiteboardObject[];
+    };
+  } {
+    const redoStack = this.userRedoStacks.get(userId) ?? [];
+    if (redoStack[redoStack.length - 1] !== targetOpId) {
+      return { accepted: false, message: 'Only the most recently undone operation can be redone.' };
+    }
+
+    const target = this.operationsLog.find((op) => op.op_id === targetOpId);
+    if (!target || target.userId !== userId) {
+      return {
+        accepted: false,
+        message: 'The redo target is unavailable or belongs to another user.',
+      };
+    }
+
+    const snapshot = this.redoSnapshots.get(targetOpId);
+    if (!snapshot) {
+      return { accepted: false, message: 'No state snapshot is available to redo.' };
+    }
+
+    const removeIds: string[] = [];
+    const restoreObjects: WhiteboardObject[] = [];
+    if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) && 'id' in snapshot) {
+      const object = snapshot as WhiteboardObject;
+      this.objects.set(object.id, this.cloneSnapshot(object));
+      restoreObjects.push(this.cloneSnapshot(object));
+    } else if (snapshot && typeof snapshot === 'object') {
+      const entries = Object.entries(snapshot as Record<string, WhiteboardObject>);
+      for (const [id, obj] of entries) {
+        if (target.type === MessageType.CLEAR_CANVAS || target.type === MessageType.ERASE) {
+          this.objects.delete(id);
+          removeIds.push(id);
+        } else {
+          this.objects.set(id, this.cloneSnapshot(obj));
+          restoreObjects.push(this.cloneSnapshot(obj));
+        }
+      }
+    }
+
+    this.userRedoStacks.set(
+      userId,
+      (this.userRedoStacks.get(userId) ?? []).filter((id) => id !== targetOpId),
+    );
+    const undoStack = this.userUndoStacks.get(userId) ?? [];
+    if (!undoStack.includes(targetOpId)) {
+      undoStack.push(targetOpId);
+      this.userUndoStacks.set(userId, undoStack);
+    }
+
+    const payload = { op_id: opId, target_op_id: targetOpId, removeIds, restoreObjects };
+    const seq = this.commit(opId, userId, MessageType.REDO, payload, Date.now());
+    return { accepted: true, seq, payload };
   }
 
   /**

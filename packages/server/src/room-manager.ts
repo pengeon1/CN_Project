@@ -94,13 +94,19 @@ export class RoomManager {
 
   /**
    * Admits a participant to an existing room after validating access codes and credentials.
+   * If sessionToken is provided, attempts to resume a previously disconnected participant identity.
+   *
+   * @returns The room, and whether the participant resumed an existing identity (as opposed to
+   *   joining as a new participant). A resumed participant that supplies the sequence number it
+   *   last applied can be caught up with an incremental resync instead of a full snapshot.
    */
   public async joinRoom(
     session: ClientSession,
     roomCode: string,
     username: string,
     password?: string,
-  ): Promise<{ room: Room }> {
+    sessionToken?: string,
+  ): Promise<{ room: Room; resumed: boolean }> {
     const normalizedCode = roomCode.trim().toUpperCase();
     const room = this.rooms.get(normalizedCode);
 
@@ -108,7 +114,10 @@ export class RoomManager {
       throw new Error(`Room with code "${normalizedCode}" not found`);
     }
 
-    if (room.locked) {
+    const resumed = room.canResume(sessionToken ?? session.sessionId);
+
+    // A lock only keeps *new* participants out; people who were already in may always come back.
+    if (room.locked && !resumed) {
       throw new Error(`Room "${normalizedCode}" is currently locked by the host`);
     }
 
@@ -127,8 +136,8 @@ export class RoomManager {
       this.leaveRoom(session, 'Switching rooms');
     }
 
-    room.addParticipant(session, username);
-    return { room };
+    room.addParticipant(session, username, undefined, sessionToken);
+    return { room, resumed };
   }
 
   /**
@@ -139,7 +148,9 @@ export class RoomManager {
 
     const room = this.rooms.get(session.roomCode);
     if (room) {
-      room.removeParticipant(session.userId, reason);
+      // Passing the session guarantees that a stale connection closing late cannot evict a
+      // participant who has already resumed on a newer connection.
+      room.removeParticipant(session.userId, reason, session);
       if (room.participantCount === 0) {
         this.logger.info(
           `Room [${room.code}] is now empty; retaining room in memory for reconnects.`,

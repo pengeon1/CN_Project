@@ -15,7 +15,7 @@ import * as path from 'node:path';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import type { MessageEnvelope } from '@cn-whiteboard/common';
 import type { ConnectOptions } from '../src/types/ipc.js';
-import { MainTcpClient } from './tcp-client.js';
+import { MainTcpClient, type TcpClientSink } from './tcp-client.js';
 
 // Optimize Chromium rasterization for crisp subpixel font rendering and high-DPI displays
 app.commandLine.appendSwitch('enable-font-antialiasing');
@@ -43,6 +43,21 @@ function getLanAddresses(): string[] {
 }
 
 /**
+ * Adapts a BrowserWindow into the sink the TCP client delivers its (already ordered and
+ * de-duplicated) output to. The renderer only ever sees this sink's output.
+ */
+function createWindowSink(win: BrowserWindow): TcpClientSink {
+  return {
+    status: (event) => {
+      if (!win.isDestroyed()) win.webContents.send('tcp:status', event);
+    },
+    message: (envelope) => {
+      if (!win.isDestroyed()) win.webContents.send('tcp:message', envelope);
+    },
+  };
+}
+
+/**
  * Creates and initializes the primary application window.
  */
 function createMainWindow(): BrowserWindow {
@@ -66,7 +81,7 @@ function createMainWindow(): BrowserWindow {
     win.show();
   });
 
-  tcpClient = new MainTcpClient(win);
+  tcpClient = new MainTcpClient(createWindowSink(win));
 
   if (isDev) {
     const loadUrlWithRetry = async (url: string, attempts = 30) => {

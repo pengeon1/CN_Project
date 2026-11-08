@@ -8,6 +8,7 @@ import { MAX_USERNAME_LENGTH } from '../constants.js';
 export const HelloPayloadSchema = z.object({
   clientVersion: z.string().min(1).max(32),
   suggestedUsername: z.string().min(1).max(MAX_USERNAME_LENGTH).optional(),
+  sessionToken: z.string().uuid().optional(),
 });
 
 export const AuthOkPayloadSchema = z.object({
@@ -28,6 +29,7 @@ export const PingPayloadSchema = z.object({
 export const PongPayloadSchema = z.object({
   nonce: z.number().int(),
   serverTs: z.number().int().positive(),
+  roomSeq: z.number().int().nonnegative().optional(),
 });
 
 export const AckPayloadSchema = z.object({

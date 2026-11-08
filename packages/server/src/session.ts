@@ -20,12 +20,13 @@ interface QueuedMessage {
 }
 
 const MAX_OUTGOING_QUEUE_SIZE = 500;
+const KEEPALIVE_INITIAL_DELAY_MS = 10_000;
 
 /**
  * Represents a connected client over a raw TCP socket.
  */
 export class ClientSession extends EventEmitter {
-  public readonly sessionId: string;
+  public sessionId: string;
   public userId: string;
   public username: string | null = null;
   public role: Role | null = null;
@@ -52,11 +53,22 @@ export class ClientSession extends EventEmitter {
     // Disable Nagle's algorithm to deliver low-latency real-time canvas events
     this.socket.setNoDelay(true);
 
+    // OS-level keepalive probes help surface half-open TCP connections (for example, a client
+    // whose network vanished) in addition to the application-level heartbeat.
+    this.socket.setKeepAlive(true, KEEPALIVE_INITIAL_DELAY_MS);
+
     this.setupSocketListeners();
   }
 
   public get remoteAddress(): string {
     return `${this.socket.remoteAddress ?? 'unknown'}:${this.socket.remotePort ?? 0}`;
+  }
+
+  /**
+   * True once the session has been torn down and can no longer send or receive.
+   */
+  public get isClosed(): boolean {
+    return this.isDestroyed;
   }
 
   private setupSocketListeners(): void {
@@ -79,8 +91,11 @@ export class ClientSession extends EventEmitter {
     });
 
     this.socket.on('error', (err: Error) => {
+      // A socket error (ECONNRESET, EPIPE, ETIMEDOUT...) means this connection is unusable.
+      // Never re-emit it as an 'error' event: an EventEmitter with no 'error' listener throws,
+      // which would crash the whole server because of a single misbehaving client.
       this.logger.warn(`Socket error on ${this.remoteAddress}: ${err.message}`);
-      this.emit('error', err);
+      this.destroy(`Socket error: ${err.message}`);
     });
 
     this.socket.on('close', (hadError: boolean) => {

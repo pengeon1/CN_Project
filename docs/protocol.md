@@ -199,8 +199,32 @@ Requests access to an existing room using a 6-character room code.
   "payload": {
     "roomCode": "AB23CD",
     "username": "Bob",
-    "password": "labpassword123"
+    "password": "labpassword123",
+    "sessionToken": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "lastSeq": 140
   }
+}
+```
+
+`sessionToken` and `lastSeq` are optional and only used to **resume** after a disconnect (see §7):
+
+- `sessionToken` is the `sessionId` the server issued in `AUTH_OK`. If it matches a participant of the room, that participant's identity (`userId`, color, role) is restored instead of creating a new one.
+- `lastSeq` is the highest room `seq` the client has applied. When the identity is resumed and `lastSeq` is supplied, the server answers with a `RESYNC_RESPONSE` containing only the missed operations (or with a full `ROOM_STATE` if the client is too far behind). Without `lastSeq` the answer is always a full `ROOM_STATE`.
+
+#### `LEAVE_ROOM` (Client -> Server)
+
+Cleanly leaves the current room. The server acknowledges with an `ACK` and broadcasts `PARTICIPANT_LEFT`. The participant's identity is retained, so they may resume it later with their session token.
+
+```json
+{
+  "v": 1,
+  "type": "LEAVE_ROOM",
+  "msg_id": "50adeb4d-3b7d-4bad-9bdd-2b0d7b3dcb02",
+  "seq": 0,
+  "ts": 1730644812000,
+  "room": "AB23CD",
+  "user_id": "661f9511-f3ac-42e5-b827-557766551111",
+  "payload": { "reason": "User left the session" }
 }
 ```
 
@@ -411,10 +435,15 @@ Transmits a batched array of intermediate freehand stroke coordinates.
       { "x": 242.0, "y": 181.5, "pressure": 0.52 },
       { "x": 245.8, "y": 184.0, "pressure": 0.55 },
       { "x": 250.1, "y": 188.4, "pressure": 0.6 }
-    ]
+    ],
+    "startIndex": 1
   }
 }
 ```
+
+`startIndex` is added by the server when it broadcasts the batch: it is the index that `points[0]` occupies in the authoritative stroke (the `startPoint` of `STROKE_BEGIN` is index 0). Receivers merge a batch by index, skipping points they already hold, so applying the same batch twice (a duplicate frame, a replay after resync, or the echo of a stroke the sender already drew locally) never duplicates points. Any `startIndex` supplied by a client is ignored.
+
+The server accepts points only for a stroke that exists and is not yet complete; otherwise it answers with a rejecting `ACK`.
 
 #### `STROKE_END` (Client -> Server -> Broadcast)
 
@@ -432,10 +461,13 @@ Finalizes the freehand stroke.
   "payload": {
     "op_id": "f103f1ee-6c54-4b01-90e6-d701748f0804",
     "strokeId": "s201f1ee-6c54-4b01-90e6-d701748f0802",
-    "finalPoint": { "x": 260.0, "y": 195.0, "pressure": 0.4 }
+    "finalPoint": { "x": 260.0, "y": 195.0, "pressure": 0.4 },
+    "startIndex": 4
   }
 }
 ```
+
+As for `STROKE_POINTS`, the server stamps `startIndex` (the index of `finalPoint`) onto the broadcast.
 
 #### `SHAPE_ADD` (Client -> Server -> Broadcast)
 
@@ -670,10 +702,13 @@ Periodic heartbeat exchanged every 5 seconds.
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "nonce": 42109,
-    "serverTs": 1730644870005
+    "serverTs": 1730644870005,
+    "roomSeq": 154
   }
 }
 ```
+
+`roomSeq` is the current sequence number of the sender's room (omitted when the sender is not in a room). It lets a client notice that it is missing the **tail** of the event stream (see §5.5).
 
 #### `RESYNC_REQUEST` (Client -> Server)
 
@@ -696,7 +731,10 @@ Sent by a client when a gap in received sequence numbers is detected.
 
 #### `RESYNC_RESPONSE` (Server -> Client)
 
-Supplies missing sequenced operations, or a full snapshot if the gap exceeds `MAX_RESYNC_OPS_WINDOW` (500 ops).
+Supplies the operations a client is missing, or a full snapshot when it is too far behind. It is the answer to a `RESYNC_REQUEST`, and also the answer to a resuming `JOIN_ROOM` that carried `lastSeq`.
+
+- The `operations` are **contiguous**: exactly `from_seq .. to_seq`, with no holes, because every sequence number the server hands out is recorded in the room's operations log (§5.1). They include participant and chat events, not only drawing operations.
+- If the client is more than `MAX_RESYNC_OPS_WINDOW` (500) operations behind, or asks for a range the server has already compacted away (the log keeps the most recent 500 once it grows past 1,000), the response carries `fullSnapshot` (a `ROOM_STATE` payload) instead of `operations`.
 
 ```json
 {
@@ -726,28 +764,143 @@ Supplies missing sequenced operations, or a full snapshot if the gap exceeds `MA
 
 ---
 
+### 4.7 Acknowledgements & Errors
+
+#### `ACK` (Server -> Client)
+
+Tells a client what became of one of its messages, identified by `target_msg_id` (the `msg_id` the client used).
+
+```json
+{
+  "v": 1,
+  "type": "ACK",
+  "msg_id": "9a4deb4d-3b7d-4bad-9bdd-2b0d7b3dcc5c",
+  "seq": 0,
+  "ts": 1730644880000,
+  "room": "AB23CD",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "payload": {
+    "target_msg_id": "b2cdeb4d-3b7d-4bad-9bdd-2b0d7b3dcb78",
+    "status": "ok",
+    "seq": 147
+  }
+}
+```
+
+| Situation                                                              | What the sender gets                                                                       |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Operation accepted for the first time                                  | No `ACK`: the broadcast **echo** (same `msg_id`, now with a `seq`) is the acknowledgement. |
+| Operation already applied (retry or duplicated frame)                  | `ACK` with `status: "ok"` and the `seq` it originally received. Nothing is re-broadcast.   |
+| Operation can never be applied (unknown or completed stroke, id clash) | `ACK` with `status: "rejected"` and an `error` text.                                       |
+| `LEAVE_ROOM`                                                           | `ACK` with `status: "ok"`.                                                                 |
+
+#### `ERROR` (Server -> Client)
+
+```json
+{
+  "v": 1,
+  "type": "ERROR",
+  "msg_id": "ab5deb4d-3b7d-4bad-9bdd-2b0d7b3dcc6d",
+  "seq": 0,
+  "ts": 1730644881000,
+  "room": "AB23CD",
+  "user_id": "661f9511-f3ac-42e5-b827-557766551111",
+  "payload": {
+    "code": "FORBIDDEN",
+    "message": "Viewer role cannot mutate canvas",
+    "details": { "target_msg_id": "a1bdeb4d-3b7d-4bad-9bdd-2b0d7b3dcb67" }
+  }
+}
+```
+
+When an error is the response to a specific client message, `details.target_msg_id` identifies it. A client uses this to stop retransmitting an operation the server will never accept (§5.6).
+
+| Code              | Meaning                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `NOT_IN_ROOM`     | The message needs a room but the connection has not joined one.                                         |
+| `FORBIDDEN`       | The sender's role does not permit the action (e.g. a `VIEWER` drawing, a non-host clearing the canvas). |
+| `JOIN_FAILED`     | The room does not exist, is locked, or the password is wrong.                                           |
+| `INVALID_PAYLOAD` | The payload failed schema validation.                                                                   |
+| `INTERNAL_ERROR`  | Unexpected server-side failure.                                                                         |
+
+---
+
 ## 5. Ordering, Concurrency, and Idempotency
 
 ### 5.1 Centralized Sequencing (`seq`)
 
 1. The server is the **single source of truth** for operation ordering.
 2. For every room, the server maintains an integer counter initialized at `0`.
-3. When a mutating operation (`STROKE_*`, `SHAPE_*`, `OBJECT_*`, `ERASE`, `CLEAR_CANVAS`, `UNDO`, `REDO`, `CHAT_MESSAGE`) is accepted, the server increments the room's counter and assigns `seq = ++room.seq`.
-4. The sequenced envelope is broadcast to all participants.
-5. All clients apply operations **strictly in ascending `seq` order**.
+3. Every event that changes shared state consumes one sequence number: drawing operations (`STROKE_*`, `SHAPE_*`, `OBJECT_*`, `ERASE`, `CLEAR_CANVAS`, `UNDO`, `REDO`), `CHAT_MESSAGE`, and the membership events `PARTICIPANT_JOINED`, `PARTICIPANT_LEFT` and `PERMISSION_CHANGE`. The server increments the room's counter and assigns `seq = ++room.seq`.
+4. **The sequence has no holes.** Every sequence number handed out is paired with exactly one entry in the room's operations log, so any range `a..b` inside the log's window can be re-sent verbatim.
+5. The sequenced envelope is broadcast to all participants. (A participant that is joining does not receive its own `PARTICIPANT_JOINED`; it learns about itself from the `ROOM_STATE` it receives.)
+6. All clients apply events **strictly in ascending `seq` order, exactly once** (§5.4).
+
+Unsequenced messages (`CURSOR_MOVE`, `PING`/`PONG`, `ACK`, `ERROR`, snapshots) carry `seq = 0` and are never replayed.
 
 ### 5.2 Client Idempotency (`op_id`)
 
-1. Every mutating operation generated by a client carries a unique client-generated UUID `op_id`.
-2. The server records recently processed `op_id`s in an in-memory set (bounded to the last 10,000 ops).
-3. If the server receives an operation with an `op_id` that has already been sequenced, the server does not re-apply the mutation. It returns an `ACK` echoing the previously assigned `seq`.
-4. This ensures network retries or duplicated client submissions are completely harmless.
+1. Every mutating operation generated by a client carries a unique client-generated UUID: `op_id`, or `id` for `CHAT_MESSAGE`.
+2. The server remembers the sequence number assigned to each of the last 10,000 operations (`op_id -> seq`).
+3. If the server receives an operation whose `op_id` it has already sequenced, it does **not** re-apply or re-broadcast it. It replies to the sender with an `ACK` (`status: "ok"`) echoing the `seq` the operation originally received.
+4. A retried `STROKE_BEGIN` for a stroke that has since been erased does not resurrect the stroke.
+5. This makes network retries, duplicated frames, and the retransmission of an outbox after a reconnect (§5.6) completely harmless.
 
 ### 5.3 Optimistic Rendering & Reconciliation
 
 1. **Local Drawing**: When a user draws with the pen tool, the client renders the stroke immediately onto an active local overlay canvas layer for instantaneous 60 FPS responsiveness.
 2. **Batching**: The client batches collected pointer coordinates every ~20 milliseconds (`STROKE_BATCH_INTERVAL_MS`) and transmits `STROKE_POINTS`.
-3. **Reconciliation**: When the server broadcasts back the echo of the stroke bearing its assigned `seq`, the client commits the stroke to its permanent synchronized canvas model and clears the temporary overlay.
+3. **Reconciliation**: While the user is still drawing, the local stroke is authoritative and echoes of it are ignored. Once the stroke is finished, the local copy is committed to the canvas model; the echoes that follow carry `startIndex`, so points the local copy already holds are skipped rather than appended twice.
+
+### 5.4 Delivery Guarantee: Exactly Once, In Order
+
+Whatever the network does, the UI is handed each sequenced event **exactly once and in strict `seq` order**. The client's network layer (main process) enforces this with a per-room cursor `lastSeq` (the highest contiguous `seq` delivered):
+
+- `seq <= lastSeq` is a duplicate or a stale replay and is dropped.
+- `seq == lastSeq + 1` is delivered immediately, followed by any buffered events that are now next in line.
+- `seq > lastSeq + 1` arrived early: it is buffered until the gap fills (or is repaired, §5.5).
+- A snapshot (`ROOM_STATE`, or `fullSnapshot` in a resync) sets the baseline `lastSeq = snapshot.seq`. Events that raced ahead of the first snapshot are held back, then delivered if they are newer than it and dropped if the snapshot already contains them. A stale or duplicated snapshot never rewinds a client that is already ahead of it.
+
+The renderer additionally ignores any sequenced event with `seq <= lastAppliedSeq`, and applies stroke points by index (§4.3), as a second line of defence.
+
+### 5.5 Gap Detection & Repair
+
+A gap means the client knows the server has reached a seq it has not applied. It is detected in two ways:
+
+1. **A later event arrives** while an earlier one is missing (`seq > lastSeq + 1`).
+2. **The heartbeat reveals a lost tail.** `PONG.roomSeq` is the room's current seq. If it is ahead of `lastSeq` and no event is on its way, the last events were lost and nothing later would ever expose it.
+
+Repair:
+
+1. Wait `250 ms` (`gapWaitMs`): a merely delayed frame usually fills the gap by itself.
+2. If the gap is still open, send `RESYNC_REQUEST { last_seq: lastSeq }`. At most one request is in flight.
+3. The `RESYNC_RESPONSE` is fed through the same pipeline as live events, so overlaps with already-buffered events are de-duplicated naturally.
+4. If no response arrives within `2 s`, ask again.
+
+### 5.6 Reliable Submission (Client Outbox)
+
+Operations that change shared state (`STROKE_*`, `SHAPE_ADD`, `OBJECT_*`, `ERASE`, `CLEAR_CANVAS`, `UNDO`, `REDO`, `CHAT_MESSAGE`) must not be lost just because the connection dropped at the wrong moment, so the client keeps each one in an **outbox** (in send order) until the server answers:
+
+| Server answer                                               | Effect                                 |
+| ----------------------------------------------------------- | -------------------------------------- |
+| Broadcast echo of the operation (or its replay in a resync) | Operation is acknowledged and removed. |
+| `ACK` (duplicate, or rejected) with `target_msg_id`         | Removed.                               |
+| `ERROR` with `details.target_msg_id`                        | Removed (it will never be accepted).   |
+
+While the connection is down, new operations are still accepted and queued. After a reconnect the whole outbox is re-sent in its original order; the server's `op_id` idempotency (§5.2) turns any operation it had already applied into a harmless `ACK`. Ephemeral messages (cursor moves) are never queued. The outbox is bounded (20,000 operations).
+
+### 5.7 Fault Model Summary
+
+| What goes wrong                                         | How it is handled                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Frame delivered twice                                   | Dropped by `seq` (server -> client) or `op_id` (client -> server).        |
+| Frames arrive out of order                              | Buffered and delivered in order (§5.4).                                   |
+| Event lost                                              | Gap detected, missing range re-fetched (§5.5).                            |
+| Last events lost, nothing follows                       | Detected through `PONG.roomSeq` (§5.5).                                   |
+| Connection dies with operations in flight               | Outbox retransmission after reconnect (§5.6); server de-duplicates.       |
+| Client silently vanishes (cable pulled, laptop asleep)  | Heartbeat timeout drops the session; the room and identity survive (§7).  |
+| Client reconnects before the server noticed it vanished | New connection takes over the old one without disturbing the room (§7.3). |
+| Client is away longer than the server keeps history     | Full snapshot instead of incremental resync (§5.5, §7.2).                 |
 
 ---
 
@@ -771,33 +924,84 @@ Collaborative whiteboards with multiple simultaneous editors present concurrency
 
 ## 7. Connection Management & Recovery
 
+### 7.1 Liveness (Heartbeat)
+
 ```text
  Client                                         Server
    |                                              |
    | --- PING (every 5s) -----------------------> |
-   | <--- PONG ---------------------------------- |
+   | <--- PONG (carries roomSeq) ---------------- |
    |                                              |
-   x [Socket Drop / Network Disconnection]        |
-   |                                              | (Server drops socket after 15s)
-   |                                              | [Broadcasts PARTICIPANT_LEFT]
-   | --- Connect & HELLO -----------------------> |
-   | <--- AUTH_OK (New socket, same session) ---- |
-   | --- JOIN_ROOM (sessionToken, last_seq: 140)->|
-   | <--- RESYNC_RESPONSE (ops 141..154) -------- |
-   | [Client catches up & resumes collaboration]  |
 ```
 
-1. **Heartbeat Monitoring**:
-   - Clients send `PING` every `5000 ms`.
-   - If the server receives no data from a socket for `15000 ms` (`HEARTBEAT_TIMEOUT_MS`), the server forcefully closes the socket and broadcasts `PARTICIPANT_LEFT`.
-   - The room session and canvas state remain alive.
-2. **Automatic Reconnection**:
-   - Upon socket disconnection, the client displays a visible "Reconnecting..." banner and attempts to reconnect with exponential backoff (500ms, 1000ms, 2000ms, max 5000ms).
-   - The client retains its `sessionToken` and `last_seq`.
-3. **Resync Catch-Up**:
-   - Upon reconnecting, the client sends `RESYNC_REQUEST` with its `last_seq`.
-   - If `room.seq - last_seq <= 500`, the server transmits `RESYNC_RESPONSE` with only the missed incremental operations.
-   - If `room.seq - last_seq > 500` (e.g. client was disconnected for hours), the server sends a full `ROOM_STATE` snapshot.
+- **Client -> server**: the client sends `PING` every `5000 ms`. If it hears nothing from the server for `15000 ms` (`HEARTBEAT_TIMEOUT_MS`) it treats the connection as dead, closes it and starts reconnecting. Any received data counts as proof of life, not only `PONG`.
+- **Server -> client**: the server sweeps all sessions every `5000 ms`. A session that has sent nothing for `15000 ms` is terminated, its participant is removed from the live roster, and `PARTICIPANT_LEFT` is broadcast.
+- **The room survives.** Closing a session never closes the room; the canvas, the operations log and the participant's identity (`userId`, color, role) are kept, so the participant can come back (§7.2).
+- TCP keepalive probes are also enabled on every socket, which helps the operating system reap half-open connections independently of the application heartbeat.
+- A socket error (for example `ECONNRESET` from a client that crashed or lost its network) only ever ends that one session. It can never take down the server.
+
+### 7.2 Reconnection & Resume
+
+```text
+ Client                                         Server
+   |                                              |
+   x [Socket drop / network outage]               |
+   |                                              | (session closed or timed out)
+   |                                              | [Broadcasts PARTICIPANT_LEFT]
+   | ... wait 500ms x 2^n (cap 5s), +/-20% ...    |
+   | --- Connect & HELLO (sessionToken) --------> |
+   | <--- AUTH_OK (same sessionId) -------------- |
+   | --- JOIN_ROOM (sessionToken, lastSeq: 140) ->|
+   | <--- RESYNC_RESPONSE (ops 141..154) -------- |
+   | [Client applies them in order, then          |
+   |  re-sends its outbox (§5.6)]                 |
+   | --- (un-acknowledged operations, in order) ->|
+   | <--- echoes / ACKs ------------------------- |
+```
+
+1. **Backoff.** The client shows a "Reconnecting..." banner and retries after `500 ms`, then `1 s`, `2 s`, `4 s`, capped at `5 s`, each delay randomized by ±20% so that a room full of clients does not reconnect in lock-step. Attempts continue until the connection succeeds, the user disconnects, or the server answers that the room no longer exists (in which case the client stops and reports the error).
+2. **Identity.** The client presents the session token it received in `AUTH_OK` (first in `HELLO`, then in `JOIN_ROOM`). The server restores the same participant: same `userId`, color and role.
+3. **Catch-up.** `JOIN_ROOM.lastSeq` tells the server how far the client got. The server replies with:
+
+   | Condition                                                                         | Reply                                                          |
+   | --------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+   | Identity resumed and `lastSeq <= room.seq`, gap within the history window         | `RESYNC_RESPONSE` with only the missed operations (contiguous) |
+   | Identity resumed but the client is older than the retained history (> 500 behind) | Full `ROOM_STATE` snapshot                                     |
+   | `lastSeq` omitted, or greater than `room.seq`, or identity not recognized         | Full `ROOM_STATE` snapshot                                     |
+
+4. **Outbox.** Only after the catch-up has been applied does the client re-send every operation that was never acknowledged, in the original order. Operations the server had in fact already applied are acknowledged as duplicates (§5.2). Drawing done while offline is therefore delivered when the connection returns.
+5. **Mid-stroke.** A stroke that was in progress when the connection dropped is not abandoned: the points that were drawn while offline are queued behind the points that were already sent, and the stroke completes on every canvas once the outbox drains.
+
+### 7.3 Identity Rules
+
+- A participant who is **already gone** from the live roster (the server timed them out) is re-admitted with their previous role and `PARTICIPANT_JOINED` is broadcast.
+- A client that **reconnects before the server noticed it vanished** (the old socket is still registered) takes over its own participant: the new connection replaces the old one, the old socket is closed, and nothing is announced because nothing changed for the other participants. No ghost participant and no spurious leave/join is created.
+- A returning `HOST` whose ownership was **transferred** to someone else while away comes back as `EDITOR`, so a room never has two hosts.
+- A **locked** room refuses new participants but always admits returning ones.
+- A connection that closes after it has been replaced can never evict the participant that replaced it.
+
+### 7.4 Slow Clients
+
+Each session has a bounded outgoing queue (500 messages). When a client cannot keep up, ephemeral `CURSOR_MOVE` traffic is shed first; if the queue still overflows, that client is disconnected (it will reconnect and resync) rather than letting its backlog exhaust server memory or slow down the room.
+
+### 7.5 Timing Reference
+
+| Parameter                  | Value                       | Where                       |
+| -------------------------- | --------------------------- | --------------------------- |
+| Heartbeat interval         | 5 s                         | client `PING`, server sweep |
+| Silence timeout            | 15 s                        | both directions             |
+| Reconnect backoff          | 500 ms x 2^n, cap 5 s, ±20% | client                      |
+| Gap wait before resync     | 250 ms                      | client                      |
+| Resync response timeout    | 2 s                         | client                      |
+| Resync window              | 500 operations              | server                      |
+| Operations log             | 1,000, compacted to 500     | server                      |
+| Remembered `op_id`s        | 10,000                      | server                      |
+| Client outbox limit        | 20,000 operations           | client                      |
+| Outgoing queue per session | 500 messages                | server                      |
+
+### 7.6 Verification
+
+The behaviour above is exercised by automated tests, including an end-to-end suite that runs the real server and the real client networking code through a **lossy TCP proxy** (`tests/lossy-proxy.ts`). The proxy parses protocol frames and can delay, duplicate, reorder and drop them, cut every connection, refuse new ones, or cut only the client side of a connection (a half-open connection the server has not noticed). The suite asserts that three clients drawing concurrently through such a network end up with exactly the server's canvas, that every event was delivered exactly once and in order, and that a client cut off mid-stroke resumes with nothing lost, nothing duplicated and its identity intact.
 
 ---
 
@@ -810,7 +1014,7 @@ Collaborative whiteboards with multiple simultaneous editors present concurrency
 2. **Role Enforcement**:
    - **`HOST`**: Full control. Only the host can execute `CLEAR_CANVAS`, `PERMISSION_CHANGE` (promote/demote/kick), lock the room, and trigger server-side persistence (`SAVE_STATE`).
    - **`EDITOR`**: Can draw, modify own objects, create shapes, and chat.
-   - **`VIEWER`**: Read-only observer. Cannot send canvas mutations. If a `VIEWER` client emits a drawing operation, the server rejects it with an `ERROR` message (`UNAUTHORIZED_ROLE`).
+   - **`VIEWER`**: Read-only observer. Cannot send canvas mutations. If a `VIEWER` client emits a drawing operation, the server rejects it with an `ERROR` message (`FORBIDDEN`).
 3. **Zero-Trust Input Validation**:
    - The server **never** trusts incoming client data.
    - Every received message envelope and payload is strictly validated via Zod schemas before entering the room operations queue. Invalid shapes, non-finite coordinates, and out-of-range dimensions are rejected at the protocol boundary.

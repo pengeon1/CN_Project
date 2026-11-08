@@ -33,6 +33,8 @@ export async function startServer(configOverride?: Partial<ServerConfig>): Promi
     host: config.host,
     port: config.port,
     dataDir: config.dataDir,
+    heartbeatIntervalMs: config.heartbeatIntervalMs,
+    heartbeatTimeoutMs: config.heartbeatTimeoutMs,
   });
 
   const { port, host } = await server.listen();

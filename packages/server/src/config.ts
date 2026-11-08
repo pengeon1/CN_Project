@@ -13,6 +13,15 @@ export interface ServerConfig {
   port: number;
   dataDir: string;
   verbose: boolean;
+  /**
+   * Interval of the liveness sweep that drops silent clients. Defaults to HEARTBEAT_INTERVAL_MS.
+   * Not exposed as a CLI flag; tests shorten it to exercise timeouts quickly.
+   */
+  heartbeatIntervalMs?: number;
+  /**
+   * Silence after which a client is considered dead. Defaults to HEARTBEAT_TIMEOUT_MS.
+   */
+  heartbeatTimeoutMs?: number;
 }
 
 /**

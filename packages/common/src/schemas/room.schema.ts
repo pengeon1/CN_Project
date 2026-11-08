@@ -27,6 +27,7 @@ export const JoinRoomPayloadSchema = z.object({
   username: z.string().min(MIN_USERNAME_LENGTH).max(MAX_USERNAME_LENGTH),
   password: z.string().min(1).max(64).optional(),
   sessionToken: z.string().uuid().optional(),
+  lastSeq: z.number().int().nonnegative().optional(),
 });
 
 export const LeaveRoomPayloadSchema = z.object({

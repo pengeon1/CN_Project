@@ -3,22 +3,31 @@
  * Manages reactive UI state, canvas viewport, room synchronization,
  * participants, active tool properties, freehand stroke collections,
  * and ephemeral remote cursors.
+ *
+ * Delivery guarantees: the main process hands this store a gap-free, in-order, de-duplicated
+ * stream of room events (see electron/tcp-client.ts). The store still ignores any sequenced event
+ * it has already applied, and applies stroke points idempotently (by their authoritative index),
+ * so replays and retransmissions can never corrupt the canvas.
  */
 
 import { create } from 'zustand';
 import {
   canMutateCanvas,
+  type ChatMessage,
   createEnvelope,
   type CursorMovePayload,
   type ErasePayload,
   generateUuid,
   isHost,
+  isSequencedType,
   type MessageEnvelope,
   MessageType,
+  mergeStrokePoints,
   type Participant,
   type ParticipantJoinedPayload,
   type ParticipantLeftPayload,
   type ParticipantListPayload,
+  type PermissionChangePayload,
   type Point,
   type RemoteCursor,
   type ResyncResponsePayload,
@@ -120,6 +129,10 @@ export interface WhiteboardState {
   broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
   eraseObjects: (objectIds: string[]) => void;
   clearCanvas: () => void;
+  /**
+   * Manually asks the server for everything after `lastSeq`. Gap recovery is normally automatic
+   * (the main process does it); this exists for diagnostics and manual refresh.
+   */
   requestResync: (lastSeq?: number) => void;
 }
 
@@ -130,9 +143,25 @@ function getElectronAPI() {
   return undefined;
 }
 
+function toChatEntry(message: ChatMessage): ChatEntry {
+  return {
+    id: message.id,
+    userId: message.userId,
+    username: message.username,
+    color: message.color,
+    text: message.text,
+    ts: message.ts,
+    isSystem: message.isSystem,
+  };
+}
+
 /**
  * Mutates an objects dictionary by applying a single sequenced operation.
  * Used for deterministic log replay during incremental state synchronization.
+ *
+ * Stroke objects are replaced rather than mutated in place so that anything holding on to the
+ * previous object (React memoization, canvas caches) observes a new identity. Stroke points are
+ * merged idempotently by their authoritative index when the operation carries one.
  */
 export function applySequencedOpToObjects(
   objects: Record<string, WhiteboardObject>,
@@ -143,7 +172,7 @@ export function applySequencedOpToObjects(
       const p = op.payload as StrokeBeginPayload;
       const existing = objects[p.strokeId];
       if (existing && existing.type === 'stroke') {
-        existing.seq = op.seq;
+        objects[p.strokeId] = { ...existing, seq: op.seq };
       } else {
         objects[p.strokeId] = {
           id: p.strokeId,
@@ -165,9 +194,9 @@ export function applySequencedOpToObjects(
       const p = op.payload as StrokePointsPayload;
       const obj = objects[p.strokeId];
       if (obj && obj.type === 'stroke') {
-        obj.points.push(...p.points);
-        obj.seq = op.seq;
-        obj.updatedAt = op.ts;
+        const points = [...obj.points];
+        mergeStrokePoints(points, p.points, p.startIndex);
+        objects[p.strokeId] = { ...obj, points, seq: op.seq, updatedAt: op.ts };
       }
       break;
     }
@@ -176,12 +205,17 @@ export function applySequencedOpToObjects(
       const p = op.payload as StrokeEndPayload;
       const obj = objects[p.strokeId];
       if (obj && obj.type === 'stroke') {
+        const points = [...obj.points];
         if (p.finalPoint) {
-          obj.points.push(p.finalPoint);
+          mergeStrokePoints(points, [p.finalPoint], p.startIndex);
         }
-        obj.isComplete = true;
-        obj.seq = op.seq;
-        obj.updatedAt = op.ts;
+        objects[p.strokeId] = {
+          ...obj,
+          points,
+          isComplete: true,
+          seq: op.seq,
+          updatedAt: op.ts,
+        };
       }
       break;
     }
@@ -592,12 +626,11 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   handleIncomingEnvelope: (envelope) => {
-    // Gap detection: if receiving a sequenced operation beyond expected next seq, trigger resync catch-up
-    if (envelope.seq > 0 && get().lastAppliedSeq > 0) {
-      const expectedSeq = get().lastAppliedSeq + 1;
-      if (envelope.seq > expectedSeq && envelope.type !== MessageType.RESYNC_RESPONSE) {
-        get().requestResync();
-      }
+    const sequenced = envelope.seq > 0 && isSequencedType(envelope.type);
+
+    // Already applied (a replay or a duplicate): applying it again could only do harm.
+    if (sequenced && envelope.seq <= get().lastAppliedSeq) {
+      return;
     }
 
     switch (envelope.type) {
@@ -606,6 +639,9 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         const currentUserId = envelope.user_id;
         const myParticipant = payload.participants.find((p) => p.id === currentUserId);
 
+        // Note: liveLocalStroke is deliberately preserved. A snapshot received while the user is
+        // mid-stroke (reconnect) must not abort the stroke; its remaining points and its end are
+        // still delivered from the outbox.
         set({
           connectionStatus: 'connected',
           roomInfo: {
@@ -626,16 +662,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           objects: payload.objects || {},
           lastAppliedSeq: payload.seq || 0,
           remoteCursors: {},
-          liveLocalStroke: null,
-          chatMessages: payload.chatHistory.map((m) => ({
-            id: m.id,
-            userId: m.userId,
-            username: m.username,
-            color: m.color,
-            text: m.text,
-            ts: m.ts,
-            isSystem: m.isSystem,
-          })),
+          chatMessages: payload.chatHistory.map(toChatEntry),
           connectModalOpen: false,
         });
         break;
@@ -644,8 +671,9 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       case MessageType.STROKE_BEGIN: {
         const payload = envelope.payload as StrokeBeginPayload;
         set((state) => {
+          // While the local user is drawing this stroke their copy is the authoritative view.
           if (state.liveLocalStroke && state.liveLocalStroke.id === payload.strokeId) {
-            state.liveLocalStroke.seq = envelope.seq;
+            return state;
           }
 
           const existing = state.objects[payload.strokeId];
@@ -665,10 +693,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
                   isComplete: false,
                 };
 
-          return {
-            objects: { ...state.objects, [payload.strokeId]: stroke },
-            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
-          };
+          return { objects: { ...state.objects, [payload.strokeId]: stroke } };
         });
         break;
       }
@@ -676,18 +701,22 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       case MessageType.STROKE_POINTS: {
         const payload = envelope.payload as StrokePointsPayload;
         set((state) => {
+          if (state.liveLocalStroke && state.liveLocalStroke.id === payload.strokeId) {
+            return state;
+          }
           const obj = state.objects[payload.strokeId];
           if (!obj || obj.type !== 'stroke') return state;
 
-          if (envelope.user_id !== state.currentUser?.id) {
-            obj.points.push(...payload.points);
-          }
-          obj.seq = envelope.seq;
-          obj.updatedAt = envelope.ts;
+          // Idempotent by index: points the local copy already holds (drawn locally, or applied
+          // from an earlier delivery) are skipped.
+          const points = [...obj.points];
+          mergeStrokePoints(points, payload.points, payload.startIndex);
 
           return {
-            objects: { ...state.objects, [payload.strokeId]: { ...obj } },
-            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
+            objects: {
+              ...state.objects,
+              [payload.strokeId]: { ...obj, points, seq: envelope.seq, updatedAt: envelope.ts },
+            },
           };
         });
         break;
@@ -696,19 +725,28 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       case MessageType.STROKE_END: {
         const payload = envelope.payload as StrokeEndPayload;
         set((state) => {
+          if (state.liveLocalStroke && state.liveLocalStroke.id === payload.strokeId) {
+            return state;
+          }
           const obj = state.objects[payload.strokeId];
           if (!obj || obj.type !== 'stroke') return state;
 
-          if (envelope.user_id !== state.currentUser?.id && payload.finalPoint) {
-            obj.points.push(payload.finalPoint);
+          const points = [...obj.points];
+          if (payload.finalPoint) {
+            mergeStrokePoints(points, [payload.finalPoint], payload.startIndex);
           }
-          obj.isComplete = true;
-          obj.seq = envelope.seq;
-          obj.updatedAt = envelope.ts;
 
           return {
-            objects: { ...state.objects, [payload.strokeId]: { ...obj } },
-            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
+            objects: {
+              ...state.objects,
+              [payload.strokeId]: {
+                ...obj,
+                points,
+                isComplete: true,
+                seq: envelope.seq,
+                updatedAt: envelope.ts,
+              },
+            },
           };
         });
         break;
@@ -797,6 +835,33 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         break;
       }
 
+      case MessageType.PERMISSION_CHANGE: {
+        const payload = envelope.payload as PermissionChangePayload;
+        set((state) => {
+          const updatedParticipants = state.participants.map((p) =>
+            p.id === payload.targetUserId && payload.newRole ? { ...p, role: payload.newRole } : p,
+          );
+
+          const updatedCurrent =
+            state.currentUser && state.currentUser.id === payload.targetUserId && payload.newRole
+              ? { ...state.currentUser, role: payload.newRole }
+              : state.currentUser;
+
+          return {
+            participants: updatedParticipants,
+            currentUser: updatedCurrent,
+            roomInfo: state.roomInfo
+              ? {
+                  ...state.roomInfo,
+                  isHost: updatedCurrent?.role === Role.HOST,
+                  locked: payload.lockRoom !== undefined ? payload.lockRoom : state.roomInfo.locked,
+                }
+              : null,
+          };
+        });
+        break;
+      }
+
       case MessageType.CHAT_MESSAGE: {
         const payload = envelope.payload as {
           id?: string;
@@ -854,10 +919,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           for (const id of payload.objectIds) {
             delete nextObjects[id];
           }
-          return {
-            objects: nextObjects,
-            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
-          };
+          return { objects: nextObjects };
         });
         break;
       }
@@ -876,7 +938,6 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           return {
             objects: {},
             liveLocalStroke: null,
-            lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq),
             chatMessages: [...state.chatMessages, systemNotice],
           };
         });
@@ -886,16 +947,30 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       case MessageType.RESYNC_RESPONSE: {
         const payload = envelope.payload as ResyncResponsePayload;
         if (payload.fullSnapshot) {
-          set((state) => ({
-            objects: payload.fullSnapshot!.objects || {},
-            lastAppliedSeq: Math.max(state.lastAppliedSeq, payload.fullSnapshot!.seq),
-            participants: payload.fullSnapshot!.participants || state.participants,
-          }));
+          const snapshot = payload.fullSnapshot;
+          set((state) => {
+            // Keep local chat entries; add whatever the snapshot knows that we do not.
+            const knownIds = new Set(state.chatMessages.map((m) => m.id));
+            const missingChat = (snapshot.chatHistory ?? [])
+              .filter((m) => !knownIds.has(m.id))
+              .map(toChatEntry);
+            return {
+              objects: snapshot.objects || {},
+              lastAppliedSeq: Math.max(state.lastAppliedSeq, snapshot.seq),
+              participants: snapshot.participants || state.participants,
+              chatMessages:
+                missingChat.length > 0
+                  ? [...state.chatMessages, ...missingChat].sort((a, b) => a.ts - b.ts)
+                  : state.chatMessages,
+            };
+          });
         } else if (payload.operations && payload.operations.length > 0) {
           set((state) => {
             const nextObjects = { ...state.objects };
             for (const op of payload.operations!) {
-              applySequencedOpToObjects(nextObjects, op);
+              if (op.seq > state.lastAppliedSeq) {
+                applySequencedOpToObjects(nextObjects, op);
+              }
             }
             return {
               objects: nextObjects,
@@ -909,6 +984,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         }
         break;
       }
+    }
+
+    if (sequenced) {
+      set((state) => ({ lastAppliedSeq: Math.max(state.lastAppliedSeq, envelope.seq) }));
     }
   },
 }));

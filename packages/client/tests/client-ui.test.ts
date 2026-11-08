@@ -749,4 +749,358 @@ describe('Client UI & Store Suite', () => {
       expect(state.chatMessages.some((m) => m.id === msg2Id)).toBe(true);
     });
   });
+
+  describe('Idempotent event application (Phase 8)', () => {
+    const remoteId = generateUuid();
+
+    const begin = (strokeId: string, seq: number, userId = remoteId) =>
+      createEnvelope(
+        MessageType.STROKE_BEGIN,
+        {
+          op_id: generateUuid(),
+          strokeId,
+          color: '#8B5CF6',
+          width: 4,
+          startPoint: { x: 0, y: 0 },
+        },
+        { room: 'ROOM1', user_id: userId, seq },
+      );
+
+    const points = (
+      strokeId: string,
+      seq: number,
+      batch: Array<{ x: number; y: number }>,
+      startIndex?: number,
+      userId = remoteId,
+    ) =>
+      createEnvelope(
+        MessageType.STROKE_POINTS,
+        { op_id: generateUuid(), strokeId, points: batch, startIndex },
+        { room: 'ROOM1', user_id: userId, seq },
+      );
+
+    const strokeOf = (id: string) => useWhiteboardStore.getState().objects[id] as StrokeObject;
+
+    it('applies stroke point batches idempotently by their authoritative index', () => {
+      const { handleIncomingEnvelope } = useWhiteboardStore.getState();
+      const strokeId = generateUuid();
+
+      handleIncomingEnvelope(begin(strokeId, 10));
+      handleIncomingEnvelope(
+        points(
+          strokeId,
+          11,
+          [
+            { x: 1, y: 1 },
+            { x: 2, y: 2 },
+          ],
+          1,
+        ),
+      );
+      expect(strokeOf(strokeId).points).toHaveLength(3);
+
+      // The same batch delivered again under a later seq (e.g. replayed by a resync).
+      handleIncomingEnvelope(
+        points(
+          strokeId,
+          12,
+          [
+            { x: 1, y: 1 },
+            { x: 2, y: 2 },
+          ],
+          1,
+        ),
+      );
+      expect(strokeOf(strokeId).points).toHaveLength(3);
+
+      // A batch that overlaps what we already have contributes only its new tail.
+      handleIncomingEnvelope(
+        points(
+          strokeId,
+          13,
+          [
+            { x: 2, y: 2 },
+            { x: 3, y: 3 },
+          ],
+          2,
+        ),
+      );
+      expect(strokeOf(strokeId).points.map((p) => p.x)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('ignores sequenced events that were already applied', () => {
+      const { handleIncomingEnvelope } = useWhiteboardStore.getState();
+      const strokeId = generateUuid();
+
+      handleIncomingEnvelope(begin(strokeId, 10));
+      const batch = points(strokeId, 11, [{ x: 1, y: 1 }]);
+      handleIncomingEnvelope(batch);
+      handleIncomingEnvelope(batch); // duplicate delivery
+      expect(strokeOf(strokeId).points).toHaveLength(2);
+
+      // A stale event (older than what was applied) must not undo newer state.
+      handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.ERASE,
+          { op_id: generateUuid(), objectIds: [strokeId] },
+          { room: 'ROOM1', user_id: remoteId, seq: 9 },
+        ),
+      );
+      expect(useWhiteboardStore.getState().objects[strokeId]).toBeDefined();
+      expect(useWhiteboardStore.getState().lastAppliedSeq).toBe(11);
+    });
+
+    it('tracks lastAppliedSeq across every kind of sequenced event', () => {
+      const { handleIncomingEnvelope } = useWhiteboardStore.getState();
+      const peerId = generateUuid();
+
+      handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.PARTICIPANT_JOINED,
+          {
+            participant: {
+              id: peerId,
+              username: 'Dana',
+              role: Role.EDITOR,
+              color: '#F59E0B',
+              joinedAt: Date.now(),
+            },
+          },
+          { room: 'ROOM1', user_id: peerId, seq: 5 },
+        ),
+      );
+      expect(useWhiteboardStore.getState().lastAppliedSeq).toBe(5);
+
+      handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.CHAT_MESSAGE,
+          { id: generateUuid(), text: 'hi', username: 'Dana', color: '#F59E0B' },
+          { room: 'ROOM1', user_id: peerId, seq: 6 },
+        ),
+      );
+      expect(useWhiteboardStore.getState().lastAppliedSeq).toBe(6);
+
+      handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.PARTICIPANT_LEFT,
+          { userId: peerId, username: 'Dana' },
+          { room: 'ROOM1', user_id: peerId, seq: 7 },
+        ),
+      );
+      expect(useWhiteboardStore.getState().lastAppliedSeq).toBe(7);
+    });
+
+    it('keeps the stroke being drawn authoritative while echoes of it arrive', () => {
+      const store = useWhiteboardStore.getState();
+      const myId = generateUuid();
+      useWhiteboardStore.setState({
+        currentUser: { id: myId, username: 'Alice', color: '#18A0FB', role: Role.HOST },
+        roomInfo: { code: 'DRAW01', name: 'Board', isHost: true, locked: false },
+      });
+
+      store.startDrawing({ x: 0, y: 0 });
+      store.updateLocalLivePoint({ x: 1, y: 1 });
+      store.updateLocalLivePoint({ x: 2, y: 2 });
+      const strokeId = useWhiteboardStore.getState().liveLocalStroke!.id;
+
+      // The server echoes the beginning of the stroke while the user is still drawing it.
+      store.handleIncomingEnvelope(begin(strokeId, 5, myId));
+      store.handleIncomingEnvelope(points(strokeId, 6, [{ x: 1, y: 1 }], 1, myId));
+
+      const state = useWhiteboardStore.getState();
+      expect(state.objects[strokeId]).toBeUndefined();
+      expect(state.liveLocalStroke?.points).toHaveLength(3);
+      expect(state.lastAppliedSeq).toBe(6);
+    });
+
+    it('does not duplicate points when the echoes of an optimistically drawn stroke arrive', () => {
+      const store = useWhiteboardStore.getState();
+      const myId = generateUuid();
+      useWhiteboardStore.setState({
+        currentUser: { id: myId, username: 'Alice', color: '#18A0FB', role: Role.HOST },
+        roomInfo: { code: 'DRAW01', name: 'Board', isHost: true, locked: false },
+      });
+
+      store.startDrawing({ x: 0, y: 0 });
+      store.updateLocalLivePoint({ x: 1, y: 1 });
+      const strokeId = useWhiteboardStore.getState().liveLocalStroke!.id;
+      store.finishDrawing({ x: 2, y: 2 }); // local copy: 3 points, complete
+      expect(strokeOf(strokeId).points).toHaveLength(3);
+
+      // Echoes of the three operations the server applied for it.
+      store.handleIncomingEnvelope(begin(strokeId, 5, myId));
+      store.handleIncomingEnvelope(points(strokeId, 6, [{ x: 1, y: 1 }], 1, myId));
+      store.handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.STROKE_END,
+          { op_id: generateUuid(), strokeId, finalPoint: { x: 2, y: 2 }, startIndex: 2 },
+          { room: 'DRAW01', user_id: myId, seq: 7 },
+        ),
+      );
+
+      const stroke = strokeOf(strokeId);
+      expect(stroke.points.map((p) => p.x)).toEqual([0, 1, 2]);
+      expect(stroke.isComplete).toBe(true);
+      expect(stroke.seq).toBe(7);
+    });
+
+    it('refills a stroke from the outbox flow when a snapshot replaced the local copy', () => {
+      const store = useWhiteboardStore.getState();
+      const myId = generateUuid();
+      useWhiteboardStore.setState({
+        currentUser: { id: myId, username: 'Alice', color: '#18A0FB', role: Role.HOST },
+        roomInfo: { code: 'DRAW01', name: 'Board', isHost: true, locked: false },
+      });
+
+      // The server's snapshot knows the stroke with only its first point.
+      const strokeId = generateUuid();
+      store.handleIncomingEnvelope(begin(strokeId, 5, myId));
+      expect(strokeOf(strokeId).points).toHaveLength(1);
+
+      // Operations retransmitted after a reconnect are echoed with their authoritative indices.
+      store.handleIncomingEnvelope(
+        points(
+          strokeId,
+          6,
+          [
+            { x: 1, y: 1 },
+            { x: 2, y: 2 },
+          ],
+          1,
+          myId,
+        ),
+      );
+      store.handleIncomingEnvelope(points(strokeId, 7, [{ x: 3, y: 3 }], 3, myId));
+
+      expect(strokeOf(strokeId).points.map((p) => p.x)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('does not abort the stroke being drawn when a snapshot arrives (reconnect)', () => {
+      const store = useWhiteboardStore.getState();
+      const myId = generateUuid();
+      useWhiteboardStore.setState({
+        currentUser: { id: myId, username: 'Alice', color: '#18A0FB', role: Role.HOST },
+        roomInfo: { code: 'DRAW01', name: 'Board', isHost: true, locked: false },
+      });
+      store.startDrawing({ x: 0, y: 0 });
+      store.updateLocalLivePoint({ x: 1, y: 1 });
+
+      store.handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.ROOM_STATE,
+          {
+            roomCode: 'DRAW01',
+            roomName: 'Board',
+            seq: 20,
+            objects: {},
+            participants: [
+              {
+                id: myId,
+                username: 'Alice',
+                role: Role.HOST,
+                color: '#18A0FB',
+                joinedAt: Date.now(),
+              },
+            ],
+            chatHistory: [],
+            locked: false,
+            createdAt: Date.now(),
+          } satisfies RoomStatePayload,
+          { room: 'DRAW01', user_id: myId, seq: 20 },
+        ),
+      );
+
+      const state = useWhiteboardStore.getState();
+      expect(state.liveLocalStroke).not.toBeNull();
+      expect(state.liveLocalStroke?.points).toHaveLength(2);
+      expect(state.lastAppliedSeq).toBe(20);
+    });
+
+    it('applies PERMISSION_CHANGE so a promoted host sees host controls', () => {
+      const myId = generateUuid();
+      const otherId = generateUuid();
+      useWhiteboardStore.setState({
+        currentUser: { id: myId, username: 'Bob', color: '#3B82F6', role: Role.EDITOR },
+        roomInfo: { code: 'PERM01', name: 'Board', isHost: false, locked: false },
+        participants: [
+          { id: myId, username: 'Bob', role: Role.EDITOR, color: '#3B82F6', joinedAt: 1 },
+          { id: otherId, username: 'Alice', role: Role.HOST, color: '#10B981', joinedAt: 0 },
+        ],
+      });
+
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { targetUserId: myId, newRole: Role.HOST },
+            { room: 'PERM01', user_id: myId, seq: 30 },
+          ),
+        );
+
+      const state = useWhiteboardStore.getState();
+      expect(state.currentUser?.role).toBe(Role.HOST);
+      expect(state.roomInfo?.isHost).toBe(true);
+      expect(state.participants.find((p) => p.id === myId)?.role).toBe(Role.HOST);
+      expect(state.lastAppliedSeq).toBe(30);
+    });
+
+    it('merges chat it was missing from a snapshot resync without dropping local messages', () => {
+      const localId = generateUuid();
+      const missedId = generateUuid();
+      useWhiteboardStore.setState({
+        chatMessages: [
+          {
+            id: localId,
+            userId: 'u1',
+            username: 'Alice',
+            color: '#10B981',
+            text: 'already here',
+            ts: 1000,
+          },
+        ],
+      });
+
+      useWhiteboardStore.getState().handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.RESYNC_RESPONSE,
+          {
+            from_seq: 0,
+            to_seq: 9,
+            fullSnapshot: {
+              roomCode: 'SNAP02',
+              roomName: 'Snapshot Room',
+              seq: 9,
+              objects: {},
+              participants: [],
+              chatHistory: [
+                {
+                  id: localId,
+                  userId: 'u1',
+                  username: 'Alice',
+                  color: '#10B981',
+                  text: 'already here',
+                  ts: 1000,
+                },
+                {
+                  id: missedId,
+                  userId: 'u2',
+                  username: 'Bob',
+                  color: '#3B82F6',
+                  text: 'you missed this',
+                  ts: 2000,
+                },
+              ],
+              locked: false,
+              createdAt: Date.now(),
+            } satisfies RoomStatePayload,
+          },
+          { room: 'SNAP02', user_id: 'u1', seq: 9 },
+        ),
+      );
+
+      const chat = useWhiteboardStore.getState().chatMessages;
+      expect(chat.map((m) => m.id)).toEqual([localId, missedId]);
+    });
+  });
 });

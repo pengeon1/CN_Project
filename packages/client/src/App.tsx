@@ -5,6 +5,7 @@
  */
 
 import React, { useEffect } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useWhiteboardStore } from './store/useWhiteboardStore.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { TopBar } from './components/layout/TopBar.js';
@@ -21,6 +22,7 @@ export const App: React.FC = () => {
 
   const {
     isDarkTheme,
+    connectionStatus,
     handleIncomingEnvelope,
     setConnectionStatus,
     setConnectModalOpen,
@@ -58,6 +60,14 @@ export const App: React.FC = () => {
     >
       {/* Top Header Bar */}
       <TopBar />
+
+      {/* Reconnecting Status Banner */}
+      {connectionStatus === 'reconnecting' && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full bg-amber-500/95 px-4 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur animate-pulse pointer-events-none">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          <span>Connection lost. Reconnecting to whiteboard...</span>
+        </div>
+      )}
 
       {/* Main Workspace: Canvas + Floating Tools + Right Sidebar */}
       <div className="relative flex flex-1 overflow-hidden">

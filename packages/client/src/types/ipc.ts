@@ -24,6 +24,14 @@ export interface ConnectionStatusEvent {
   userId?: string;
   sessionId?: string;
   roomCode?: string;
+  /**
+   * While reconnecting: the 1-based number of the reconnect attempt that is being scheduled.
+   */
+  attempt?: number;
+  /**
+   * While reconnecting: milliseconds until the next attempt starts.
+   */
+  retryInMs?: number;
 }
 
 /**

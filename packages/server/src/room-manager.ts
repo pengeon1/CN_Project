@@ -9,8 +9,12 @@ import { Logger } from './logger.js';
 import { Room, type PersistedRoomState } from './room.js';
 import type { ClientSession } from './session.js';
 
+const JOIN_FAILURE_LIMIT = 5;
+const JOIN_FAILURE_WINDOW_MS = 60_000;
+
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
+  private failedJoinAttempts = new Map<string, number[]>();
   private logger = new Logger('RoomManager');
   private readonly onRoomChange: (room: Room) => void;
 
@@ -63,16 +67,52 @@ export class RoomManager {
    * Verifies a candidate plaintext password against an existing scrypt salt:hash string.
    */
   public async verifyPassword(password: string, storedHash: string): Promise<boolean> {
-    return new Promise((resolve, reject) => {
-      const [salt, key] = storedHash.split(':');
-      if (!salt || !key) return resolve(false);
+    const [salt, key, extra] = storedHash.split(':');
+    if (
+      !salt ||
+      !/^[0-9a-f]{32}$/i.test(salt) ||
+      !key ||
+      !/^[0-9a-f]{128}$/i.test(key) ||
+      extra !== undefined
+    ) {
+      return false;
+    }
 
+    return new Promise((resolve, reject) => {
       crypto.scrypt(password, salt, 64, (err, derivedKey) => {
         if (err) return reject(err);
         const keyBuffer = Buffer.from(key, 'hex');
         resolve(crypto.timingSafeEqual(keyBuffer, derivedKey));
       });
     });
+  }
+
+  private checkJoinRateLimit(remoteIp: string): void {
+    const now = Date.now();
+    for (const [ip, attempts] of this.failedJoinAttempts) {
+      const recentAttempts = attempts.filter(
+        (timestamp) => now - timestamp < JOIN_FAILURE_WINDOW_MS,
+      );
+      if (recentAttempts.length > 0) {
+        this.failedJoinAttempts.set(ip, recentAttempts);
+      } else {
+        this.failedJoinAttempts.delete(ip);
+      }
+    }
+
+    const attempts = this.failedJoinAttempts.get(remoteIp) ?? [];
+    if (attempts.length >= JOIN_FAILURE_LIMIT) {
+      const retryAfterSeconds = Math.ceil((attempts[0]! + JOIN_FAILURE_WINDOW_MS - now) / 1000);
+      throw new Error(
+        `Too many failed room join attempts. Try again in ${retryAfterSeconds} seconds.`,
+      );
+    }
+  }
+
+  private recordFailedJoin(remoteIp: string): void {
+    const attempts = this.failedJoinAttempts.get(remoteIp) ?? [];
+    attempts.push(Date.now());
+    this.failedJoinAttempts.set(remoteIp, attempts);
   }
 
   /**
@@ -83,6 +123,7 @@ export class RoomManager {
     roomName: string,
     username: string,
     password?: string,
+    allowNameChanges = false,
   ): Promise<Room> {
     const code = this.generateRoomCode();
     let passwordHash: string | null = null;
@@ -91,7 +132,14 @@ export class RoomManager {
       passwordHash = await this.hashPassword(password.trim());
     }
 
-    const room = new Room(code, roomName, session.userId, passwordHash);
+    const room = new Room(
+      code,
+      roomName,
+      session.userId,
+      passwordHash,
+      Date.now(),
+      allowNameChanges,
+    );
     room.setOnChange(this.onRoomChange);
     this.rooms.set(code, room);
 
@@ -116,6 +164,7 @@ export class RoomManager {
         state.hostUserId,
         state.passwordHash,
         state.createdAt,
+        state.allowNameChanges ?? false,
       );
       room.restorePersistedState(state, { restoredFromDisk: true });
       room.setOnChange(this.onRoomChange);
@@ -139,37 +188,47 @@ export class RoomManager {
     password?: string,
     sessionToken?: string,
   ): Promise<{ room: Room; resumed: boolean }> {
-    const normalizedCode = roomCode.trim().toUpperCase();
-    const room = this.rooms.get(normalizedCode);
+    this.checkJoinRateLimit(session.remoteIp);
+    try {
+      const normalizedCode = roomCode.trim().toUpperCase();
+      const room = this.rooms.get(normalizedCode);
 
-    if (!room) {
-      throw new Error(`Room with code "${normalizedCode}" not found`);
-    }
-
-    const resumed = room.canResume(sessionToken ?? session.sessionId);
-
-    // A lock only keeps *new* participants out; people who were already in may always come back.
-    if (room.locked && !resumed && !room.isAwaitingRestoredHost) {
-      throw new Error(`Room "${normalizedCode}" is currently locked by the host`);
-    }
-
-    if (room.passwordHash) {
-      if (!password) {
-        throw new Error('This room requires a password');
+      if (!room) {
+        throw new Error(`Room with code "${normalizedCode}" not found`);
       }
-      const isValid = await this.verifyPassword(password, room.passwordHash);
-      if (!isValid) {
-        throw new Error('Incorrect room password');
+
+      const token = sessionToken ?? session.sessionId;
+      if (room.wasKicked(token)) {
+        throw new Error('You have been removed from this room');
       }
-    }
+      const resumed = room.canResume(token);
 
-    // If participant is already in this or another room, leave it first
-    if (session.roomCode && session.roomCode !== normalizedCode) {
-      this.leaveRoom(session, 'Switching rooms');
-    }
+      // A lock only keeps *new* participants out; people who were already in may always come back.
+      if (room.locked && !resumed && !room.isAwaitingRestoredHost) {
+        throw new Error(`Room "${normalizedCode}" is currently locked by the host`);
+      }
 
-    room.addParticipant(session, username, undefined, sessionToken);
-    return { room, resumed };
+      if (room.passwordHash) {
+        if (!password) {
+          throw new Error('This room requires a password');
+        }
+        const isValid = await this.verifyPassword(password, room.passwordHash);
+        if (!isValid) {
+          throw new Error('Incorrect room password');
+        }
+      }
+
+      // If participant is already in this or another room, leave it first
+      if (session.roomCode && session.roomCode !== normalizedCode) {
+        this.leaveRoom(session, 'Switching rooms');
+      }
+
+      room.addParticipant(session, username, undefined, sessionToken);
+      return { room, resumed };
+    } catch (error) {
+      this.recordFailedJoin(session.remoteIp);
+      throw error;
+    }
   }
 
   /**

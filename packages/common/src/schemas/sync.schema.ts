@@ -26,6 +26,7 @@ export const RoomSnapshotSchema = z.object({
   participants: z.array(ParticipantSchema),
   chatHistory: z.array(ChatMessageSchema),
   locked: z.boolean(),
+  allowNameChanges: z.boolean().optional().default(false),
   createdAt: z.number().int().positive(),
 });
 

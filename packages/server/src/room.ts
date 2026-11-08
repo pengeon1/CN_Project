@@ -48,6 +48,7 @@ export interface PersistedRoomState {
   createdAt: number;
   hostUserId: string;
   locked: boolean;
+  allowNameChanges?: boolean;
   passwordHash: string | null;
   seq: number;
   baseSeq: number;
@@ -75,6 +76,7 @@ export class Room {
   public readonly createdAt: number;
   public hostUserId: string;
   public locked: boolean = false;
+  public allowNameChanges: boolean;
   public passwordHash: string | null = null;
 
   /**
@@ -107,6 +109,7 @@ export class Room {
   private participants: Map<string, RoomParticipantEntry> = new Map();
   private disconnectedParticipants: Map<string, Participant> = new Map();
   private sessionTokenToUserId: Map<string, string> = new Map();
+  private kickedSessionTokens = new Set<string>();
   private objects: Map<string, WhiteboardObject> = new Map();
   /**
    * op_id -> the seq the operation was assigned. Insertion-ordered so the oldest entry can be
@@ -139,12 +142,14 @@ export class Room {
     hostUserId: string,
     passwordHash?: string | null,
     createdAt = Date.now(),
+    allowNameChanges = false,
   ) {
     this.code = code;
     this.name = name;
     this.hostUserId = hostUserId;
     this.passwordHash = passwordHash ?? null;
     this.createdAt = createdAt;
+    this.allowNameChanges = allowNameChanges;
     this.logger = new Logger(`Room ${code}`);
   }
 
@@ -373,6 +378,7 @@ export class Room {
       createdAt: this.createdAt,
       hostUserId: this.hostUserId,
       locked: this.locked,
+      allowNameChanges: this.allowNameChanges,
       passwordHash: this.passwordHash,
       seq: this.seq,
       baseSeq: this.baseSeq,
@@ -411,10 +417,14 @@ export class Room {
     const previousSeq = this.seq;
     const previousHostUserId = this.hostUserId;
     const previousLocked = this.locked;
+    const previousAllowNameChanges = this.allowNameChanges;
     const previousPasswordHash = this.passwordHash;
     const previousProcessedOps = this.processedOps;
     this.hostUserId = options.preserveSequence ? previousHostUserId : state.hostUserId;
     this.locked = options.preserveSequence ? previousLocked : state.locked;
+    this.allowNameChanges = options.preserveSequence
+      ? previousAllowNameChanges
+      : (state.allowNameChanges ?? false);
     this.passwordHash = options.preserveSequence ? previousPasswordHash : state.passwordHash;
     this.awaitingRestoredHost = options.restoredFromDisk ?? false;
     this.seq = options.preserveSequence ? Math.max(previousSeq, state.seq) : state.seq;
@@ -904,6 +914,10 @@ export class Room {
     return this.disconnectedParticipants.has(userId) || this.participants.has(userId);
   }
 
+  public wasKicked(sessionToken: string | undefined): boolean {
+    return sessionToken !== undefined && this.kickedSessionTokens.has(sessionToken);
+  }
+
   /**
    * Registers a connected client as a room participant.
    *
@@ -1098,11 +1112,49 @@ export class Room {
     return entry.participant;
   }
 
+  public kickParticipant(userId: string, reason: string): Participant | null {
+    const entry = this.participants.get(userId);
+    if (!entry || userId === this.hostUserId) return null;
+
+    for (const [token, mappedUserId] of this.sessionTokenToUserId) {
+      if (mappedUserId === userId) {
+        this.sessionTokenToUserId.delete(token);
+        this.kickedSessionTokens.add(token);
+      }
+    }
+    this.kickedSessionTokens.add(entry.session.sessionId);
+
+    const participant = this.removeParticipant(userId, reason, entry.session);
+    if (participant) {
+      this.disconnectedParticipants.delete(userId);
+      entry.session.destroy(reason);
+    }
+    return participant;
+  }
+
   /**
    * Retrieves participant details by user ID.
    */
   public getParticipant(userId: string): Participant | undefined {
     return this.participants.get(userId)?.participant;
+  }
+
+  public setParticipantRole(userId: string, role: Participant['role']): boolean {
+    if (userId === this.hostUserId || role === Role.HOST) return false;
+    const entry = this.participants.get(userId);
+    if (!entry) return false;
+    entry.participant.role = role;
+    entry.session.role = role;
+    this.notifyChanged();
+    return true;
+  }
+
+  public renameParticipant(userId: string, username: string): boolean {
+    const entry = this.participants.get(userId);
+    if (!entry || entry.participant.username === username) return false;
+    entry.participant.username = username;
+    entry.session.username = username;
+    return true;
   }
 
   /**
@@ -1174,6 +1226,7 @@ export class Room {
       participants: this.getParticipants(),
       chatHistory: this.getChatHistory(),
       locked: this.locked,
+      allowNameChanges: this.allowNameChanges,
       createdAt: this.createdAt,
     };
   }

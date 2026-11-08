@@ -432,6 +432,7 @@ export class MainTcpClient {
             roomName: options.roomName || `${options.username}'s Board`,
             username: options.username,
             password,
+            allowNameChanges: options.allowNameChanges ?? false,
           },
           { user_id: this.userId },
         ),

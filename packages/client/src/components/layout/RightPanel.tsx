@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { MessageSquare, Send, Shield, Users, X } from 'lucide-react';
+import { MessageSquare, Pencil, Send, Shield, Users, X } from 'lucide-react';
 import { Role } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
@@ -16,6 +16,9 @@ export const RightPanel: React.FC = () => {
     unreadChatCount,
     participants,
     currentUser,
+    roomInfo,
+    sendPermissionChange,
+    setProfileSettingsOpen,
     setRightPanelOpen,
     setRightPanelTab,
     sendChatMessage,
@@ -197,6 +200,57 @@ export const RightPanel: React.FC = () => {
                       {p.role}
                     </span>
                   </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {isMe && roomInfo?.allowNameChanges && (
+                    <button
+                      type="button"
+                      onClick={() => setProfileSettingsOpen(true)}
+                      aria-label="Change your display name"
+                      className="group relative rounded-md p-1.5 text-slate-400 transition hover:bg-slate-700 hover:text-slate-100"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-medium text-slate-100 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                      >
+                        Change name
+                      </span>
+                    </button>
+                  )}
+                  {currentUser?.role === Role.HOST && p.role !== Role.HOST && !isMe && (
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        aria-label={`Role for ${p.username}`}
+                        value={p.role}
+                        onChange={(event) => {
+                          const newRole =
+                            event.currentTarget.value === Role.VIEWER ? Role.VIEWER : Role.EDITOR;
+                          sendPermissionChange({ targetUserId: p.id, newRole });
+                        }}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-1.5 py-1 text-[10px] text-slate-300"
+                      >
+                        <option value={Role.EDITOR}>Editor</option>
+                        <option value={Role.VIEWER}>Viewer</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`Remove ${p.username} from this room?`)) {
+                            sendPermissionChange({
+                              targetUserId: p.id,
+                              kick: true,
+                              reason: 'Removed by host',
+                            });
+                          }
+                        }}
+                        title={`Remove ${p.username} from the room`}
+                        className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-rose-400 hover:bg-rose-500/10"
+                      >
+                        Kick
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );

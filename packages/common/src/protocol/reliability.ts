@@ -23,6 +23,7 @@ import type { Point } from '../types/whiteboard.js';
 export const SEQUENCED_MESSAGE_TYPES: ReadonlySet<MessageType> = new Set<MessageType>([
   MessageType.PARTICIPANT_JOINED,
   MessageType.PARTICIPANT_LEFT,
+  MessageType.PARTICIPANT_RENAMED,
   MessageType.PERMISSION_CHANGE,
   MessageType.STROKE_BEGIN,
   MessageType.STROKE_POINTS,

@@ -25,12 +25,14 @@ export const StrokePointsPayloadSchema = z.object({
   op_id: z.string().uuid(),
   strokeId: z.string().uuid(),
   points: z.array(PointSchema).min(1).max(2000),
+  startIndex: z.number().int().nonnegative().optional(),
 });
 
 export const StrokeEndPayloadSchema = z.object({
   op_id: z.string().uuid(),
   strokeId: z.string().uuid(),
   finalPoint: PointSchema.optional(),
+  startIndex: z.number().int().nonnegative().optional(),
 });
 
 export const BaseWhiteboardObjectSchema = z.object({

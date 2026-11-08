@@ -26,6 +26,7 @@ A standalone, high-performance, real-time collaborative whiteboard built from sc
 - **Server**: Centralized coordinator implemented with Node.js built-in `net` module. Manages room state, monotonically increasing sequence numbers (`seq`), event broadcasting, idempotency via client `op_id`, and LAN discovery (`dgram`).
 - **Client**: Cross-platform desktop application built on Electron, React 18, Vite, and Tailwind CSS. All networking runs exclusively in Electron's Main process over raw Node `net` sockets; the UI renderer remains responsive and communicates with the main process over a strongly-typed IPC preload bridge.
 - **Protocol**: Custom binary framing (4-byte big-endian unsigned length prefix + UTF-8 JSON envelope).
+- **Reliability**: Every room event carries a gap-free server sequence number. Clients deliver events exactly once and in order, repair gaps by resync, retransmit un-acknowledged operations after a reconnect (the server de-duplicates by `op_id`), and resume their identity with a session token after a dropped connection. See [`docs/protocol.md`](docs/protocol.md) §5 and §7.
 
 ---
 

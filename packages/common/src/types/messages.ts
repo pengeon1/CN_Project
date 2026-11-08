@@ -113,6 +113,7 @@ export interface MessageEnvelope<T = unknown> {
 export interface HelloPayload {
   clientVersion: string;
   suggestedUsername?: string;
+  sessionToken?: string;
 }
 
 export interface AuthOkPayload {
@@ -137,6 +138,11 @@ export interface JoinRoomPayload {
   username: string;
   password?: string;
   sessionToken?: string;
+  /**
+   * Highest contiguous room seq the client has applied. Sent when resuming after a disconnect so
+   * the server can reply with only the missed operations instead of a full snapshot.
+   */
+  lastSeq?: number;
 }
 
 export interface LeaveRoomPayload {
@@ -177,12 +183,21 @@ export interface StrokePointsPayload {
   op_id: string;
   strokeId: string;
   points: Point[];
+  /**
+   * Index of `points[0]` within the authoritative stroke. Assigned by the server on broadcast
+   * (ignored on client input) so clients can apply a batch idempotently.
+   */
+  startIndex?: number;
 }
 
 export interface StrokeEndPayload {
   op_id: string;
   strokeId: string;
   finalPoint?: Point;
+  /**
+   * Index of `finalPoint` within the authoritative stroke. Assigned by the server on broadcast.
+   */
+  startIndex?: number;
 }
 
 export interface ShapeAddPayload {
@@ -247,6 +262,11 @@ export interface PingPayload {
 export interface PongPayload {
   nonce: number;
   serverTs: number;
+  /**
+   * Current sequence number of the sender's room. Lets a client notice that it is missing the
+   * tail of the event stream even when no later event arrives to expose the gap.
+   */
+  roomSeq?: number;
 }
 
 export interface AckPayload {

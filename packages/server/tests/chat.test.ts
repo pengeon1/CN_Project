@@ -19,7 +19,8 @@ import {
   Role,
   type RoomStatePayload,
 } from '@cn-whiteboard/common';
-import { startServer, type WhiteboardServer } from '../src/index.js';
+import type { WhiteboardServer } from '../src/index.js';
+import { closeIsolatedServer, startIsolatedServer } from './helpers/isolated-server.js';
 
 class SocketTestClient {
   public socket: net.Socket;
@@ -109,7 +110,7 @@ describe('Real-time Group Chat Suite (Phase 7)', () => {
   const clients: SocketTestClient[] = [];
 
   beforeEach(async () => {
-    const instance = await startServer({ host: '127.0.0.1', port: 0 });
+    const instance = await startIsolatedServer({ host: '127.0.0.1', port: 0 });
     server = instance.server;
     port = instance.port;
   });
@@ -119,7 +120,7 @@ describe('Real-time Group Chat Suite (Phase 7)', () => {
       c.close();
     }
     clients.length = 0;
-    await server.close();
+    await closeIsolatedServer(server);
   });
 
   it('broadcasts chat messages to all room participants with monotonic seq', async () => {

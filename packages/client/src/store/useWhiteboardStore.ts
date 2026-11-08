@@ -32,6 +32,7 @@ import {
   type RemoteCursor,
   type ResyncResponsePayload,
   Role,
+  type RoomSnapshot,
   type RoomStatePayload,
   type SequencedOperation,
   type StrokeBeginPayload,
@@ -73,7 +74,14 @@ export interface WhiteboardState {
   connectionStatus: ConnectionStatus;
   connectionError: string | null;
   serverInfo: { host: string; port: number };
-  roomInfo: { code: string; name: string; isHost: boolean; locked: boolean } | null;
+  roomInfo: {
+    code: string;
+    name: string;
+    isHost: boolean;
+    locked: boolean;
+    createdAt?: number;
+  } | null;
+  persistenceStatus: string | null;
   currentUser: { id: string; username: string; color: string; role: Role } | null;
   participants: Participant[];
 
@@ -127,6 +135,9 @@ export interface WhiteboardState {
   redoLastAction: () => void;
   connectToServer: (options: ConnectOptions) => Promise<boolean>;
   disconnectFromServer: () => Promise<void>;
+  requestSaveState: () => Promise<void>;
+  requestLoadState: () => Promise<void>;
+  exportBoard: () => Promise<void>;
   handleIncomingEnvelope: (envelope: MessageEnvelope) => void;
 
   // Drawing & Cursor actions
@@ -250,6 +261,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   connectionError: null,
   serverInfo: { host: '127.0.0.1', port: 4000 },
   roomInfo: null,
+  persistenceStatus: null,
   currentUser: null,
   participants: [],
 
@@ -461,6 +473,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           name: options.roomName || 'Demo Whiteboard',
           isHost: options.action === 'create',
           locked: false,
+          createdAt: Date.now(),
         },
         currentUser: mockUser,
         participants: [
@@ -486,6 +499,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     set({
       connectionStatus: 'disconnected',
       roomInfo: null,
+      persistenceStatus: null,
       currentUser: null,
       participants: [],
       chatMessages: [],
@@ -494,6 +508,84 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       remoteCursors: {},
       lastAppliedSeq: 0,
     });
+  },
+
+  requestSaveState: async () => {
+    const { currentUser, roomInfo } = get();
+    const api = getElectronAPI();
+    if (!currentUser || !roomInfo || !api || !roomInfo.isHost) return;
+
+    set({ persistenceStatus: 'Saving room...' });
+    try {
+      const sent = await api.sendMessage(
+        createEnvelope(
+          MessageType.SAVE_STATE,
+          {},
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+      if (!sent) set({ persistenceStatus: 'Could not send save request.' });
+    } catch (error) {
+      set({
+        persistenceStatus: error instanceof Error ? error.message : 'Could not send save request.',
+      });
+    }
+  },
+
+  requestLoadState: async () => {
+    const { currentUser, roomInfo } = get();
+    const api = getElectronAPI();
+    if (!currentUser || !roomInfo || !api || !roomInfo.isHost) return;
+
+    set({ persistenceStatus: 'Loading saved room...' });
+    try {
+      const sent = await api.sendMessage(
+        createEnvelope(
+          MessageType.LOAD_STATE,
+          {},
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+      if (!sent) set({ persistenceStatus: 'Could not send load request.' });
+    } catch (error) {
+      set({
+        persistenceStatus: error instanceof Error ? error.message : 'Could not send load request.',
+      });
+    }
+  },
+
+  exportBoard: async () => {
+    const { roomInfo, participants, objects, lastAppliedSeq, chatMessages } = get();
+    const api = getElectronAPI();
+    if (!roomInfo) return;
+    if (!api) {
+      set({ persistenceStatus: 'JSON export is available in the desktop app.' });
+      return;
+    }
+
+    const snapshot: RoomSnapshot = {
+      roomCode: roomInfo.code,
+      roomName: roomInfo.name,
+      seq: lastAppliedSeq,
+      objects,
+      participants,
+      chatHistory: chatMessages,
+      locked: roomInfo.locked,
+      createdAt: roomInfo.createdAt ?? Date.now(),
+    };
+    try {
+      const result = await api.exportBoard(snapshot);
+      if (result.canceled) return;
+      set({
+        persistenceStatus: result.success
+          ? `Exported ${result.filePath ?? 'board JSON'}`
+          : (result.error ?? 'Could not export board.'),
+      });
+    } catch (error) {
+      set({
+        persistenceStatus: error instanceof Error ? error.message : 'Could not export board.',
+      });
+    }
   },
 
   startDrawing: (startPoint) => {
@@ -708,6 +800,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             name: payload.roomName,
             isHost: myParticipant?.role === Role.HOST,
             locked: payload.locked,
+            createdAt: payload.createdAt,
           },
           currentUser: myParticipant
             ? {
@@ -726,6 +819,31 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           chatMessages: payload.chatHistory.map(toChatEntry),
           connectModalOpen: false,
         });
+        break;
+      }
+
+      case MessageType.SAVE_STATE: {
+        const payload = envelope.payload as { filename?: string };
+        set({
+          persistenceStatus: `Saved room${payload.filename ? ` to ${payload.filename}` : ''}.`,
+        });
+        break;
+      }
+
+      case MessageType.LOAD_STATE: {
+        const payload = envelope.payload as { filename?: string };
+        set({
+          persistenceStatus: `Loaded saved room${payload.filename ? ` from ${payload.filename}` : ''}.`,
+        });
+        break;
+      }
+
+      case MessageType.ERROR: {
+        const payload = envelope.payload as { message?: string };
+        const status = get().persistenceStatus;
+        if (status?.startsWith('Saving') || status?.startsWith('Loading')) {
+          set({ persistenceStatus: payload.message ?? 'The room persistence request failed.' });
+        }
         break;
       }
 

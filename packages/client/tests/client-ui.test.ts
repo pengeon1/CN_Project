@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createEnvelope,
   generateUuid,
   MessageType,
   type ResyncResponsePayload,
   Role,
+  type RoomSnapshot,
   type RoomStatePayload,
   type SequencedOperation,
   type StrokeObject,
@@ -12,14 +13,20 @@ import {
 } from '@cn-whiteboard/common';
 import { applySequencedOpToObjects, useWhiteboardStore } from '../src/store/useWhiteboardStore.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
+import type { ElectronWhiteboardAPI } from '../src/types/ipc.js';
 
 describe('Client UI & Store Suite', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     // Reset store to initial state
     useWhiteboardStore.setState({
       connectionStatus: 'disconnected',
       connectionError: null,
       roomInfo: null,
+      persistenceStatus: null,
       currentUser: null,
       participants: [],
       chatMessages: [],
@@ -118,6 +125,39 @@ describe('Client UI & Store Suite', () => {
     expect(state.roomInfo?.isHost).toBe(true);
     expect(state.currentUser?.username).toBe('Alice');
     expect(state.participants).toHaveLength(1);
+  });
+
+  it('exports the current room snapshot through the Electron bridge', async () => {
+    const snapshots: RoomSnapshot[] = [];
+    const api: ElectronWhiteboardAPI = {
+      platform: 'test',
+      connect: async () => ({ success: true }),
+      disconnect: async () => undefined,
+      sendMessage: async () => true,
+      onMessage: () => () => undefined,
+      onStatus: () => () => undefined,
+      exportBoard: async (snapshot) => {
+        snapshots.push(snapshot);
+        return { success: true, filePath: '/tmp/Planning.json' };
+      },
+    };
+    vi.stubGlobal('window', { electronAPI: api });
+    useWhiteboardStore.setState({
+      roomInfo: { code: 'TEST23', name: 'Planning', isHost: true, locked: false, createdAt: 123 },
+      lastAppliedSeq: 7,
+    });
+
+    await useWhiteboardStore.getState().exportBoard();
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      roomCode: 'TEST23',
+      roomName: 'Planning',
+      seq: 7,
+      createdAt: 123,
+      objects: {},
+    });
+    expect(useWhiteboardStore.getState().persistenceStatus).toBe('Exported /tmp/Planning.json');
   });
 
   it('updates participant list and emits chat notice on PARTICIPANT_JOINED and PARTICIPANT_LEFT', () => {

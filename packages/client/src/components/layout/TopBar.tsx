@@ -5,12 +5,24 @@
  */
 
 import React from 'react';
-import { ArrowLeft, LogIn, MessageSquare, Moon, Search, Share2, Sun } from 'lucide-react';
+import {
+  ArrowLeft,
+  Download,
+  LogIn,
+  MessageSquare,
+  Moon,
+  Search,
+  Share2,
+  Sun,
+  Upload,
+  Save,
+} from 'lucide-react';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
 export const TopBar: React.FC = () => {
   const {
     roomInfo,
+    persistenceStatus,
     currentUser,
     participants,
     rightPanelOpen,
@@ -22,6 +34,9 @@ export const TopBar: React.FC = () => {
     setConnectModalOpen,
     disconnectFromServer,
     toggleTheme,
+    requestSaveState,
+    requestLoadState,
+    exportBoard,
   } = useWhiteboardStore();
 
   const getInitials = (name: string): string => {
@@ -68,13 +83,54 @@ export const TopBar: React.FC = () => {
             )}
           </div>
           <span className="text-[11px] text-slate-400 dark:text-slate-500">
-            {roomInfo ? 'All changes saved locally' : 'No active session'}
+            {roomInfo ? (persistenceStatus ?? 'Changes autosaved') : 'No active session'}
           </span>
         </div>
       </div>
 
       {/* Right controls: Avatars, Search, Chat, Share, Theme */}
       <div className="flex items-center gap-2.5">
+        {roomInfo && (
+          <>
+            {roomInfo.isHost && (
+              <>
+                <button
+                  onClick={() => void requestSaveState()}
+                  title="Save room to the server"
+                  className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+                >
+                  <Save className="h-4 w-4" />
+                  Save
+                </button>
+                <button
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'Load the last saved board? Current unsaved changes will be replaced.',
+                      )
+                    ) {
+                      void requestLoadState();
+                    }
+                  }}
+                  title="Load the last saved room state"
+                  className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+                >
+                  <Upload className="h-4 w-4" />
+                  Load
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => void exportBoard()}
+              title="Export board as JSON"
+              className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+            >
+              <Download className="h-4 w-4" />
+              Export
+            </button>
+          </>
+        )}
+
         {/* Participant Avatar Stack */}
         <div className="flex items-center -space-x-1.5 overflow-hidden py-1">
           {participants.map((p) => {

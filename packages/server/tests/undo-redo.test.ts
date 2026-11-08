@@ -8,7 +8,8 @@ import {
   MessageType,
   generateUuid,
 } from '@cn-whiteboard/common';
-import { startServer, type WhiteboardServer } from '../src/index.js';
+import type { WhiteboardServer } from '../src/index.js';
+import { closeIsolatedServer, startIsolatedServer } from './helpers/isolated-server.js';
 
 class SocketTestClient {
   private socket: net.Socket;
@@ -81,7 +82,7 @@ describe('Undo/redo server semantics', () => {
   const activeClients: SocketTestClient[] = [];
 
   beforeEach(async () => {
-    const { server, port } = await startServer({ host: '127.0.0.1', port: 0 });
+    const { server, port } = await startIsolatedServer({ host: '127.0.0.1', port: 0 });
     serverInstance = server;
     serverPort = port;
   });
@@ -92,7 +93,7 @@ describe('Undo/redo server semantics', () => {
     }
     activeClients.length = 0;
     if (serverInstance) {
-      await serverInstance.close();
+      await closeIsolatedServer(serverInstance);
       serverInstance = undefined;
     }
   });

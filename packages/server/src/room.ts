@@ -39,6 +39,29 @@ export interface RoomParticipantEntry {
 }
 
 /**
+ * JSON-safe room state needed to restore board consistency without restoring live sessions.
+ */
+export interface PersistedRoomState {
+  schemaVersion: 1;
+  roomCode: string;
+  roomName: string;
+  createdAt: number;
+  hostUserId: string;
+  locked: boolean;
+  passwordHash: string | null;
+  seq: number;
+  baseSeq: number;
+  objects: Record<string, WhiteboardObject>;
+  operations: SequencedOperation[];
+  chatHistory: ChatMessage[];
+  processedOps: Array<[string, number]>;
+  userUndoStacks: Record<string, string[]>;
+  userRedoStacks: Record<string, string[]>;
+  undoSnapshots: Record<string, WhiteboardObject | Record<string, WhiteboardObject> | null>;
+  redoSnapshots: Record<string, WhiteboardObject | Record<string, WhiteboardObject> | null>;
+}
+
+/**
  * Maximum number of processed op ids remembered for idempotency checks.
  */
 const MAX_PROCESSED_OPS = 10_000;
@@ -107,13 +130,21 @@ export class Room {
   private colorIndex: number = 0;
   private serialQueue: Promise<void> = Promise.resolve();
   private logger: Logger;
+  private onChange: ((room: Room) => void) | null = null;
+  private awaitingRestoredHost = false;
 
-  constructor(code: string, name: string, hostUserId: string, passwordHash?: string | null) {
+  constructor(
+    code: string,
+    name: string,
+    hostUserId: string,
+    passwordHash?: string | null,
+    createdAt = Date.now(),
+  ) {
     this.code = code;
     this.name = name;
     this.hostUserId = hostUserId;
     this.passwordHash = passwordHash ?? null;
-    this.createdAt = Date.now();
+    this.createdAt = createdAt;
     this.logger = new Logger(`Room ${code}`);
   }
 
@@ -132,6 +163,24 @@ export class Room {
    */
   public get operationsCount(): number {
     return this.operationsLog.length;
+  }
+
+  /**
+   * Whether this restored room still needs its first live participant to claim host ownership.
+   */
+  public get isAwaitingRestoredHost(): boolean {
+    return this.awaitingRestoredHost;
+  }
+
+  /**
+   * Attaches the persistence scheduler used to debounce durable room writes.
+   */
+  public setOnChange(listener: ((room: Room) => void) | null): void {
+    this.onChange = listener;
+  }
+
+  private notifyChanged(): void {
+    this.onChange?.(this);
   }
 
   /**
@@ -180,6 +229,7 @@ export class Room {
     if (this.chatHistory.length > this.maxChatHistorySize) {
       this.chatHistory.splice(0, this.chatHistory.length - this.maxChatHistorySize);
     }
+    this.notifyChanged();
   }
 
   /**
@@ -308,7 +358,99 @@ export class Room {
     const seq = this.nextSeq();
     this.markOpProcessed(opId, seq);
     this.recordOperation({ op_id: opId, seq, userId, type, payload, ts });
+    this.notifyChanged();
     return seq;
+  }
+
+  /**
+   * Creates a JSON-safe copy of the complete state required to resume a room after a restart.
+   */
+  public getPersistedState(): PersistedRoomState {
+    return {
+      schemaVersion: 1,
+      roomCode: this.code,
+      roomName: this.name,
+      createdAt: this.createdAt,
+      hostUserId: this.hostUserId,
+      locked: this.locked,
+      passwordHash: this.passwordHash,
+      seq: this.seq,
+      baseSeq: this.baseSeq,
+      objects: Object.fromEntries(
+        Array.from(this.objects, ([id, object]) => [id, this.cloneSnapshot(object)]),
+      ),
+      operations: this.cloneSnapshot(this.operationsLog),
+      chatHistory: this.cloneSnapshot(this.chatHistory),
+      processedOps: Array.from(this.processedOps.entries()),
+      userUndoStacks: Object.fromEntries(
+        Array.from(this.userUndoStacks, ([id, stack]) => [id, [...stack]]),
+      ),
+      userRedoStacks: Object.fromEntries(
+        Array.from(this.userRedoStacks, ([id, stack]) => [id, [...stack]]),
+      ),
+      undoSnapshots: Object.fromEntries(
+        Array.from(this.undoSnapshots, ([id, snapshot]) => [id, this.cloneSnapshot(snapshot)]),
+      ),
+      redoSnapshots: Object.fromEntries(
+        Array.from(this.redoSnapshots, ([id, snapshot]) => [id, this.cloneSnapshot(snapshot)]),
+      ),
+    };
+  }
+
+  /**
+   * Restores durable state while intentionally dropping old live sessions and participant sockets.
+   */
+  public restorePersistedState(
+    state: PersistedRoomState,
+    options: { preserveSequence?: boolean; restoredFromDisk?: boolean } = {},
+  ): void {
+    if (state.roomCode !== this.code || state.roomName !== this.name) {
+      throw new Error(`Persisted room identity does not match ${this.code}`);
+    }
+
+    const previousSeq = this.seq;
+    const previousHostUserId = this.hostUserId;
+    const previousLocked = this.locked;
+    const previousPasswordHash = this.passwordHash;
+    const previousProcessedOps = this.processedOps;
+    this.hostUserId = options.preserveSequence ? previousHostUserId : state.hostUserId;
+    this.locked = options.preserveSequence ? previousLocked : state.locked;
+    this.passwordHash = options.preserveSequence ? previousPasswordHash : state.passwordHash;
+    this.awaitingRestoredHost = options.restoredFromDisk ?? false;
+    this.seq = options.preserveSequence ? Math.max(previousSeq, state.seq) : state.seq;
+    this.baseSeq = options.preserveSequence ? this.seq + 1 : state.baseSeq;
+    this.objects = new Map(
+      Object.entries(state.objects).map(([id, object]) => [id, this.cloneSnapshot(object)]),
+    );
+    this.operationsLog = options.preserveSequence ? [] : this.cloneSnapshot(state.operations);
+    this.chatHistory = this.cloneSnapshot(state.chatHistory);
+    this.processedOps = new Map(state.processedOps);
+    if (options.preserveSequence) {
+      for (const [opId, seq] of previousProcessedOps) this.processedOps.set(opId, seq);
+      while (this.processedOps.size > MAX_PROCESSED_OPS) {
+        const oldestOpId = this.processedOps.keys().next().value;
+        if (oldestOpId === undefined) break;
+        this.processedOps.delete(oldestOpId);
+      }
+    }
+    this.userUndoStacks = new Map(
+      Object.entries(state.userUndoStacks).map(([id, stack]) => [id, [...stack]]),
+    );
+    this.userRedoStacks = new Map(
+      Object.entries(state.userRedoStacks).map(([id, stack]) => [id, [...stack]]),
+    );
+    this.undoSnapshots = new Map(
+      Object.entries(state.undoSnapshots).map(([id, snapshot]) => [
+        id,
+        this.cloneSnapshot(snapshot),
+      ]),
+    );
+    this.redoSnapshots = new Map(
+      Object.entries(state.redoSnapshots).map(([id, snapshot]) => [
+        id,
+        this.cloneSnapshot(snapshot),
+      ]),
+    );
   }
 
   /**
@@ -828,6 +970,14 @@ export class Room {
       assignedColor = session.color ?? this.pickColor();
     }
 
+    if (
+      assignedRole === Role.HOST &&
+      this.participants.size === 0 &&
+      this.disconnectedParticipants.size === 0
+    ) {
+      this.hostUserId = session.userId;
+    }
+
     if (token) {
       this.sessionTokenToUserId.set(token, session.userId);
     }
@@ -867,6 +1017,7 @@ export class Room {
     this.broadcast(joinedEnvelope);
 
     this.participants.set(session.userId, { session, participant });
+    this.awaitingRestoredHost = false;
     this.recordSystemMessage(`${username} joined the whiteboard.`);
     this.logger.info(
       `Participant joined: ${username} (${session.userId}) as ${assignedRole}. Total: ${this.participants.size}`,
@@ -987,6 +1138,22 @@ export class Room {
         continue;
       }
       entry.session.send(envelope);
+    }
+  }
+
+  /**
+   * Sends a full room snapshot to each participant with that participant's own envelope identity.
+   */
+  public broadcastSnapshot(): void {
+    const snapshot = this.getSnapshot();
+    for (const [userId, entry] of this.participants.entries()) {
+      entry.session.send(
+        createEnvelope(MessageType.ROOM_STATE, snapshot, {
+          room: this.code,
+          user_id: userId,
+          seq: this.seq,
+        }),
+      );
     }
   }
 

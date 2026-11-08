@@ -5,7 +5,7 @@
  */
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { MessageEnvelope } from '@cn-whiteboard/common';
+import type { MessageEnvelope, RoomSnapshot } from '@cn-whiteboard/common';
 import type {
   ConnectOptions,
   ConnectionStatusEvent,
@@ -20,6 +20,8 @@ const api: ElectronWhiteboardAPI = {
   disconnect: () => ipcRenderer.invoke('tcp:disconnect'),
 
   sendMessage: (envelope: MessageEnvelope) => ipcRenderer.invoke('tcp:send', envelope),
+
+  exportBoard: (snapshot: RoomSnapshot) => ipcRenderer.invoke('board:export', snapshot),
 
   onMessage: (callback: (envelope: MessageEnvelope) => void) => {
     const handler = (_event: IpcRendererEvent, envelope: MessageEnvelope) => callback(envelope);

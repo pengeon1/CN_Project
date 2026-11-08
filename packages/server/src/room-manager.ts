@@ -6,12 +6,20 @@
 import * as crypto from 'node:crypto';
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '@cn-whiteboard/common';
 import { Logger } from './logger.js';
-import { Room } from './room.js';
+import { Room, type PersistedRoomState } from './room.js';
 import type { ClientSession } from './session.js';
 
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
   private logger = new Logger('RoomManager');
+  private readonly onRoomChange: (room: Room) => void;
+
+  /**
+   * Creates the room registry and installs its durable-change callback.
+   */
+  constructor(onRoomChange: (room: Room) => void) {
+    this.onRoomChange = onRoomChange;
+  }
 
   /**
    * Generates a collision-free 6-character room code using the unambiguous alphabet.
@@ -84,12 +92,36 @@ export class RoomManager {
     }
 
     const room = new Room(code, roomName, session.userId, passwordHash);
+    room.setOnChange(this.onRoomChange);
     this.rooms.set(code, room);
 
     room.addParticipant(session, username);
     this.logger.info(`Created new room "${roomName}" [Code: ${code}] hosted by ${username}`);
 
     return room;
+  }
+
+  /**
+   * Registers validated persisted rooms before clients can connect.
+   */
+  public restoreRooms(states: PersistedRoomState[]): void {
+    for (const state of states) {
+      if (this.rooms.has(state.roomCode)) {
+        throw new Error(`Duplicate persisted room code: ${state.roomCode}`);
+      }
+
+      const room = new Room(
+        state.roomCode,
+        state.roomName,
+        state.hostUserId,
+        state.passwordHash,
+        state.createdAt,
+      );
+      room.restorePersistedState(state, { restoredFromDisk: true });
+      room.setOnChange(this.onRoomChange);
+      this.rooms.set(room.code, room);
+      this.logger.info(`Restored room "${room.name}" [Code: ${room.code}]`);
+    }
   }
 
   /**
@@ -117,7 +149,7 @@ export class RoomManager {
     const resumed = room.canResume(sessionToken ?? session.sessionId);
 
     // A lock only keeps *new* participants out; people who were already in may always come back.
-    if (room.locked && !resumed) {
+    if (room.locked && !resumed && !room.isAwaitingRestoredHost) {
       throw new Error(`Room "${normalizedCode}" is currently locked by the host`);
     }
 

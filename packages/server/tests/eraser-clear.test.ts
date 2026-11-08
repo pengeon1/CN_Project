@@ -15,7 +15,8 @@ import {
   Role,
   type RoomStatePayload,
 } from '@cn-whiteboard/common';
-import { startServer, type WhiteboardServer } from '../src/index.js';
+import type { WhiteboardServer } from '../src/index.js';
+import { closeIsolatedServer, startIsolatedServer } from './helpers/isolated-server.js';
 
 class SocketTestClient {
   public socket: net.Socket;
@@ -105,7 +106,7 @@ describe('Eraser and Canvas Clear Synchronization Suite', () => {
   const clients: SocketTestClient[] = [];
 
   beforeEach(async () => {
-    const instance = await startServer({ host: '127.0.0.1', port: 0 });
+    const instance = await startIsolatedServer({ host: '127.0.0.1', port: 0 });
     server = instance.server;
     port = instance.port;
   });
@@ -115,7 +116,7 @@ describe('Eraser and Canvas Clear Synchronization Suite', () => {
       c.close();
     }
     clients.length = 0;
-    await server.close();
+    await closeIsolatedServer(server);
   });
 
   it('erases objects by ID and propagates ERASE event with monotonic seq to all clients', async () => {

@@ -24,6 +24,8 @@ describe('Client UI & Store Suite', () => {
       participants: [],
       chatMessages: [],
       unreadChatCount: 0,
+      undoStack: [],
+      redoStack: [],
       activeTool: 'pen',
       zoom: 1.0,
       panX: 0,
@@ -196,6 +198,68 @@ describe('Client UI & Store Suite', () => {
     expect(state.objects[strokeId]).toBeDefined();
     expect((state.objects[strokeId] as { isComplete: boolean }).isComplete).toBe(true);
     expect((state.objects[strokeId] as { points: unknown[] }).points).toHaveLength(3);
+  });
+
+  it('applies sequenced undo and redo effects to the visible canvas', () => {
+    const userId = generateUuid();
+    const strokeId = generateUuid();
+    const targetOpId = generateUuid();
+    const stroke: StrokeObject = {
+      id: strokeId,
+      authorId: userId,
+      seq: 1,
+      zIndex: 1,
+      updatedAt: Date.now(),
+      type: 'stroke',
+      color: '#18A0FB',
+      width: 3,
+      points: [{ x: 10, y: 20 }],
+      isComplete: true,
+    };
+
+    useWhiteboardStore.setState({
+      currentUser: { id: userId, username: 'Alice', color: '#18A0FB', role: Role.HOST },
+      roomInfo: { code: 'UNDO01', name: 'Undo test', isHost: true, locked: false },
+      objects: { [strokeId]: stroke },
+      undoStack: [targetOpId],
+    });
+
+    const { handleIncomingEnvelope } = useWhiteboardStore.getState();
+    handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.UNDO,
+        {
+          op_id: generateUuid(),
+          target_op_id: targetOpId,
+          removeIds: [strokeId],
+          restoreObjects: [],
+        },
+        { room: 'UNDO01', user_id: userId, seq: 1 },
+      ),
+    );
+
+    let state = useWhiteboardStore.getState();
+    expect(state.objects[strokeId]).toBeUndefined();
+    expect(state.undoStack).toEqual([]);
+    expect(state.redoStack).toEqual([targetOpId]);
+
+    handleIncomingEnvelope(
+      createEnvelope(
+        MessageType.REDO,
+        {
+          op_id: generateUuid(),
+          target_op_id: targetOpId,
+          removeIds: [],
+          restoreObjects: [stroke],
+        },
+        { room: 'UNDO01', user_id: userId, seq: 2 },
+      ),
+    );
+
+    state = useWhiteboardStore.getState();
+    expect(state.objects[strokeId]).toEqual(stroke);
+    expect(state.redoStack).toEqual([]);
+    expect(state.undoStack).toEqual([targetOpId]);
   });
 
   it('synchronizes incoming remote strokes and remote cursors', () => {

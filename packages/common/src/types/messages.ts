@@ -228,11 +228,15 @@ export interface ClearCanvasPayload {
 export interface UndoPayload {
   op_id: string;
   target_op_id: string;
+  removeIds?: string[];
+  restoreObjects?: WhiteboardObject[];
 }
 
 export interface RedoPayload {
   op_id: string;
   target_op_id: string;
+  removeIds?: string[];
+  restoreObjects?: WhiteboardObject[];
 }
 
 export interface CursorMovePayload {

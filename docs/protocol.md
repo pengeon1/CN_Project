@@ -571,6 +571,9 @@ Clears all objects from the whiteboard. Restricted to participants with the `HOS
 #### `UNDO` / `REDO` (Client -> Server -> Broadcast)
 
 Issues a compensating operation targeting a prior operation performed by the same user.
+The client sends only `op_id` and `target_op_id`; the server adds the authoritative `removeIds` and
+`restoreObjects` arrays to the sequenced broadcast so peers and resyncing clients make the same
+canvas change.
 
 ```json
 {
@@ -583,7 +586,9 @@ Issues a compensating operation targeting a prior operation performed by the sam
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "payload": {
     "op_id": "f108f1ee-6c54-4b01-90e6-d701748f0810",
-    "target_op_id": "f104f1ee-6c54-4b01-90e6-d701748f0805"
+    "target_op_id": "f104f1ee-6c54-4b01-90e6-d701748f0805",
+    "removeIds": ["d290f1ee-6c54-4b01-90e6-d701748f0851"],
+    "restoreObjects": []
   }
 }
 ```
@@ -909,14 +914,16 @@ While the connection is down, new operations are still accepted and queued. Afte
 Collaborative whiteboards with multiple simultaneous editors present concurrency conflicts if undo simply removes the last added element from the canvas. The protocol defines unambiguous undo/redo semantics:
 
 1. **Per-User Local Stacks**:
-   - Each client tracks its **own** operations in a local Undo stack.
+   - Each client tracks its **own** completed strokes, erases, and canvas clears in a local Undo stack. A stroke's begin, point batches, and end are one user action.
    - User A clicking Undo **never** undoes or alters work authored by User B.
 2. **Compensating Operations**:
    - Performing an Undo does not destructively modify server history. Instead, the client sends an `UNDO` operation referencing the target `target_op_id`.
    - The server sequences this `UNDO` operation like any other mutation (`seq = ++room.seq`) and broadcasts it to all peers.
-   - All clients apply the compensating inversion (e.g. marking the targeted stroke as deleted).
+   - The sequenced broadcast contains `removeIds` and `restoreObjects`, the authoritative canvas changes for that inverse. All clients, including the sender and clients catching up through resync, apply the same changes.
+   - Redo uses the same fields to restore the removed object(s) or remove the object(s) restored by undo.
+   - Shortcuts are `Ctrl/Cmd+Z` to undo, `Ctrl/Cmd+Shift+Z` to redo, and `Ctrl+Y` to redo. Shortcuts are ignored while focus is in an input or editable field.
 3. **Conflict Resolution**:
-   - If User A attempts to undo a shape that User B has subsequently deleted or that was cleared via `CLEAR_CANVAS`, the server rejects the undo as a no-op and notifies User A via an informational toast.
+   - The server only accepts the top operation on the requesting user's undo/redo stack. A target already removed by another action is rejected with `UNDO_FAILED`; an unavailable redo target is rejected with `REDO_FAILED`.
 4. **Redo Invalidation**:
    - If a user performs any new canvas mutation after undoing, that user's local Redo stack is automatically cleared.
 

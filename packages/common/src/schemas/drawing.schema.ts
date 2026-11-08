@@ -105,11 +105,15 @@ export const ClearCanvasPayloadSchema = z.object({
 export const UndoPayloadSchema = z.object({
   op_id: z.string().uuid(),
   target_op_id: z.string().uuid(),
+  removeIds: z.array(z.string().uuid()).optional(),
+  restoreObjects: z.array(WhiteboardObjectSchema).optional(),
 });
 
 export const RedoPayloadSchema = z.object({
   op_id: z.string().uuid(),
   target_op_id: z.string().uuid(),
+  removeIds: z.array(z.string().uuid()).optional(),
+  restoreObjects: z.array(WhiteboardObjectSchema).optional(),
 });
 
 export const CursorMovePayloadSchema = z.object({

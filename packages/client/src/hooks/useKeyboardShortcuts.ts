@@ -58,7 +58,7 @@ export function isEditableElement(target: EventTarget | null): boolean {
 }
 
 export function useKeyboardShortcuts(): void {
-  const { setActiveTool } = useWhiteboardStore();
+  const { setActiveTool, undoLastAction, redoLastAction } = useWhiteboardStore();
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -69,18 +69,37 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
-      // 2. Escape reverts to Select tool
+      // 2. Handle undo/redo before normal tool mapping.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z') {
+          if (e.shiftKey) {
+            redoLastAction();
+          } else {
+            undoLastAction();
+          }
+          e.preventDefault();
+          return;
+        }
+        if (key === 'y') {
+          redoLastAction();
+          e.preventDefault();
+          return;
+        }
+      }
+
+      // 3. Escape reverts to Select tool
       if (e.key === 'Escape') {
         setActiveTool('select');
         return;
       }
 
-      // 3. Ignore if system modifier keys (Ctrl, Meta/Cmd, Alt) are held
+      // 4. Ignore if system modifier keys (Ctrl, Meta/Cmd, Alt) are held
       if (e.ctrlKey || e.metaKey || e.altKey) {
         return;
       }
 
-      // 4. Map single-key shortcuts to whiteboard tools
+      // 5. Map single-key shortcuts to whiteboard tools
       const tool = TOOL_SHORTCUTS[e.key];
       if (tool) {
         setActiveTool(tool);
@@ -91,5 +110,5 @@ export function useKeyboardShortcuts(): void {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [setActiveTool]);
+  }, [redoLastAction, setActiveTool, undoLastAction]);
 }

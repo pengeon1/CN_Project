@@ -38,6 +38,8 @@ import {
   type StrokeEndPayload,
   type StrokeObject,
   type StrokePointsPayload,
+  type UndoPayload,
+  type RedoPayload,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
 import type { ConnectionStatus, ConnectOptions } from '../types/ipc.js';
@@ -85,6 +87,10 @@ export interface WhiteboardState {
   chatMessages: ChatEntry[];
   unreadChatCount: number;
 
+  // Undo / redo history
+  undoStack: string[];
+  redoStack: string[];
+
   // Tool state
   activeTool: CanvasTool;
   toolProps: ToolProperties;
@@ -117,6 +123,8 @@ export interface WhiteboardState {
   setClearModalOpen: (open: boolean) => void;
   toggleTheme: () => void;
   sendChatMessage: (text: string) => void;
+  undoLastAction: () => void;
+  redoLastAction: () => void;
   connectToServer: (options: ConnectOptions) => Promise<boolean>;
   disconnectFromServer: () => Promise<void>;
   handleIncomingEnvelope: (envelope: MessageEnvelope) => void;
@@ -249,6 +257,8 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   liveLocalStroke: null,
   remoteCursors: {},
   lastAppliedSeq: 0,
+  undoStack: [],
+  redoStack: [],
 
   chatMessages: [],
   unreadChatCount: 0,
@@ -374,6 +384,52 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     }
   },
 
+  undoLastAction: () => {
+    const { currentUser, roomInfo, undoStack } = get();
+    const targetOpId = undoStack[undoStack.length - 1];
+    if (!currentUser || !roomInfo || !targetOpId) return;
+
+    const api = getElectronAPI();
+    if (!api) return;
+
+    const op_id = generateUuid();
+    api.sendMessage(
+      createEnvelope(
+        MessageType.UNDO,
+        { op_id, target_op_id: targetOpId },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+
+    set((state) => ({
+      undoStack: state.undoStack.slice(0, -1),
+      redoStack: [...state.redoStack, targetOpId],
+    }));
+  },
+
+  redoLastAction: () => {
+    const { currentUser, roomInfo, redoStack } = get();
+    const targetOpId = redoStack[redoStack.length - 1];
+    if (!currentUser || !roomInfo || !targetOpId) return;
+
+    const api = getElectronAPI();
+    if (!api) return;
+
+    const op_id = generateUuid();
+    api.sendMessage(
+      createEnvelope(
+        MessageType.REDO,
+        { op_id, target_op_id: targetOpId },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+
+    set((state) => ({
+      redoStack: state.redoStack.slice(0, -1),
+      undoStack: [...state.undoStack, targetOpId],
+    }));
+  },
+
   connectToServer: async (options) => {
     set({ connectionStatus: 'connecting', connectionError: null });
 
@@ -452,6 +508,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     const strokeId = generateUuid();
     const op_id = generateUuid();
     const authorId = currentUser ? currentUser.id : 'local-user';
+    set((state) => ({ undoStack: [...state.undoStack, op_id], redoStack: [] }));
 
     const stroke: StrokeObject = {
       id: strokeId,
@@ -580,6 +637,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     const api = getElectronAPI();
     if (api && roomInfo && currentUser) {
       const op_id = generateUuid();
+      set((state) => ({ undoStack: [...state.undoStack, op_id], redoStack: [] }));
       api.sendMessage(
         createEnvelope(
           MessageType.ERASE,
@@ -600,6 +658,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     const api = getElectronAPI();
     if (api && roomInfo && currentUser) {
       const op_id = generateUuid();
+      set((state) => ({ undoStack: [...state.undoStack, op_id], redoStack: [] }));
       api.sendMessage(
         createEnvelope(
           MessageType.CLEAR_CANVAS,
@@ -661,6 +720,8 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           participants: payload.participants,
           objects: payload.objects || {},
           lastAppliedSeq: payload.seq || 0,
+          undoStack: [],
+          redoStack: [],
           remoteCursors: {},
           chatMessages: payload.chatHistory.map(toChatEntry),
           connectModalOpen: false,
@@ -939,6 +1000,58 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             objects: {},
             liveLocalStroke: null,
             chatMessages: [...state.chatMessages, systemNotice],
+          };
+        });
+        break;
+      }
+
+      case MessageType.UNDO: {
+        const payload = envelope.payload as UndoPayload;
+        set((state) => {
+          const nextObjects = { ...state.objects };
+          for (const id of payload.removeIds ?? []) {
+            delete nextObjects[id];
+          }
+          for (const object of payload.restoreObjects ?? []) {
+            nextObjects[object.id] = object;
+          }
+
+          if (envelope.user_id !== state.currentUser?.id) {
+            return { objects: nextObjects };
+          }
+
+          return {
+            objects: nextObjects,
+            undoStack: state.undoStack.filter((id) => id !== payload.target_op_id),
+            redoStack: state.redoStack.includes(payload.target_op_id)
+              ? state.redoStack
+              : [...state.redoStack, payload.target_op_id],
+          };
+        });
+        break;
+      }
+
+      case MessageType.REDO: {
+        const payload = envelope.payload as RedoPayload;
+        set((state) => {
+          const nextObjects = { ...state.objects };
+          for (const id of payload.removeIds ?? []) {
+            delete nextObjects[id];
+          }
+          for (const object of payload.restoreObjects ?? []) {
+            nextObjects[object.id] = object;
+          }
+
+          if (envelope.user_id !== state.currentUser?.id) {
+            return { objects: nextObjects };
+          }
+
+          return {
+            objects: nextObjects,
+            redoStack: state.redoStack.filter((id) => id !== payload.target_op_id),
+            undoStack: state.undoStack.includes(payload.target_op_id)
+              ? state.undoStack
+              : [...state.undoStack, payload.target_op_id],
           };
         });
         break;

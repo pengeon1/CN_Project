@@ -686,6 +686,100 @@ export class WhiteboardServer {
         break;
       }
 
+      case MessageType.UNDO: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (
+          !this.authorize(
+            session,
+            envelope,
+            room,
+            canMutateCanvas(session.role),
+            'Viewer role cannot undo canvas actions',
+          )
+        ) {
+          return;
+        }
+
+        const payload = validatePayload<{ op_id: string; target_op_id: string }>(
+          MessageType.UNDO,
+          envelope.payload,
+        );
+
+        await room.enqueue(() => {
+          if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
+          const result = room.applyUndo(payload.op_id, payload.target_op_id, session.userId);
+          if (!result.accepted || !result.payload || result.seq === undefined) {
+            this.sendError(
+              session,
+              'UNDO_FAILED',
+              result.message ?? 'Undo rejected',
+              envelope,
+              room.code,
+            );
+            return;
+          }
+
+          room.broadcast(
+            createEnvelope(MessageType.UNDO, result.payload, {
+              msg_id: envelope.msg_id,
+              seq: result.seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: Date.now(),
+            }),
+          );
+        });
+        break;
+      }
+
+      case MessageType.REDO: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (
+          !this.authorize(
+            session,
+            envelope,
+            room,
+            canMutateCanvas(session.role),
+            'Viewer role cannot redo canvas actions',
+          )
+        ) {
+          return;
+        }
+
+        const payload = validatePayload<{ op_id: string; target_op_id: string }>(
+          MessageType.REDO,
+          envelope.payload,
+        );
+
+        await room.enqueue(() => {
+          if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
+          const result = room.applyRedo(payload.op_id, payload.target_op_id, session.userId);
+          if (!result.accepted || !result.payload || result.seq === undefined) {
+            this.sendError(
+              session,
+              'REDO_FAILED',
+              result.message ?? 'Redo rejected',
+              envelope,
+              room.code,
+            );
+            return;
+          }
+
+          room.broadcast(
+            createEnvelope(MessageType.REDO, result.payload, {
+              msg_id: envelope.msg_id,
+              seq: result.seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: Date.now(),
+            }),
+          );
+        });
+        break;
+      }
+
       case MessageType.RESYNC_REQUEST: {
         const room = this.requireRoom(
           session,

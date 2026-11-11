@@ -11,6 +11,7 @@
     "server": "npm --workspace=@cn-whiteboard/server run dev",
     "client": "npm --workspace=@cn-whiteboard/client run dev",
     "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run --workspaces --if-present typecheck",
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",

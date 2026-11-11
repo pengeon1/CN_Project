@@ -3,7 +3,7 @@
  * Supports Server LAN IP, Port, Username, Room Code, and optional passwords.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   ChevronDown,

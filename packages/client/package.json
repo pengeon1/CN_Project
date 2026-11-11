@@ -9,7 +9,7 @@
     "build:electron": "esbuild electron/main.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/main.cjs && esbuild electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/preload.cjs",
     "dev:electron": "npm run build:electron && electron dist-electron/main.cjs",
     "dev": "concurrently -k -s first \"npm run dev:vite\" \"wait-on http://127.0.0.1:5173 && npm run dev:electron\"",
-    "build:vite": "vite build",
+    "build:vite": "tsc --noEmit && vite build",
     "build": "npm run build:vite && npm run build:electron",
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "package": "npm run build && electron-builder --publish never",

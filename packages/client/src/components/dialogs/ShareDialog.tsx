@@ -30,7 +30,7 @@ export const ShareDialog: React.FC = () => {
               serverInfo.host === '127.0.0.1' ||
               serverInfo.host === 'localhost' ||
               serverInfo.host === '0.0.0.0';
-            if (isLoopback) {
+            if (isLoopback && addresses[0]) {
               setActiveIp(addresses[0]);
             } else {
               setActiveIp(serverInfo.host);

@@ -27,8 +27,12 @@ import {
   Role,
   type RoomSnapshot,
   type SequencedOperation,
+  type ObjectChanges,
+  type ShapeObject,
   type StrokeObject,
   type WhiteboardObject,
+  applyObjectChanges,
+  normalizeNewShape,
 } from '@cn-whiteboard/common';
 import { Logger } from './logger.js';
 import type { ClientSession } from './session.js';
@@ -612,6 +616,96 @@ export class Room {
     return obj;
   }
 
+  /** Highest zIndex currently on the board (0 when empty), used to place new objects on top. */
+  private maxZIndex(): number {
+    let max = 0;
+    for (const obj of this.objects.values()) max = Math.max(max, obj.zIndex);
+    return max;
+  }
+
+  /**
+   * Adds a shape, text box or sticky note. The server assigns authorship, z-order and seq, so a
+   * client cannot forge another user's authorship or jump the layer order.
+   *
+   * @returns The stored object, or null if the object id is already taken by a different op.
+   */
+  public applyShapeAdd(opId: string, object: ShapeObject, userId: string): ShapeObject | null {
+    if (this.hasProcessedOp(opId)) {
+      const existing = this.objects.get(object.id);
+      return existing && existing.type === 'shape' ? existing : null;
+    }
+    if (this.objects.has(object.id)) return null;
+
+    const ts = Date.now();
+    const stored = normalizeNewShape(object, userId, this.maxZIndex() + 1, 0, ts);
+    this.undoSnapshots.set(opId, null);
+    stored.seq = this.commit(
+      opId,
+      userId,
+      MessageType.SHAPE_ADD,
+      { op_id: opId, object: stored },
+      ts,
+    );
+    this.objects.set(stored.id, stored);
+    this.rememberUserMutation(userId, opId);
+    return stored;
+  }
+
+  /**
+   * Applies a property update to one object. Because the room serializes all operations, the
+   * order of application is the seq order: last writer wins per property, deterministically.
+   *
+   * @returns The updated object, or null when the target no longer exists (deleted/erased first).
+   */
+  public applyObjectUpdate(
+    opId: string,
+    id: string,
+    changes: ObjectChanges,
+    userId: string,
+  ): WhiteboardObject | null {
+    const current = this.objects.get(id);
+    if (this.hasProcessedOp(opId)) return current ?? null;
+    if (!current) return null;
+
+    const ts = Date.now();
+    this.undoSnapshots.set(opId, this.cloneSnapshot(current));
+    const updated = applyObjectChanges(current, changes, 0, ts);
+    updated.seq = this.commit(
+      opId,
+      userId,
+      MessageType.OBJECT_UPDATE,
+      { op_id: opId, id, changes },
+      ts,
+    );
+    this.objects.set(id, updated);
+    this.rememberUserMutation(userId, opId);
+    return updated;
+  }
+
+  /**
+   * Deletes one object. Stored as a snapshot map (like ERASE) so undo can restore it.
+   *
+   * @returns The sequence number, or null when the object does not exist.
+   */
+  public applyObjectDelete(opId: string, id: string, userId: string): number | null {
+    const prior = this.processedOps.get(opId);
+    if (prior !== undefined) return prior;
+    const current = this.objects.get(id);
+    if (!current) return null;
+
+    this.undoSnapshots.set(opId, { [id]: this.cloneSnapshot(current) });
+    this.objects.delete(id);
+    const seq = this.commit(
+      opId,
+      userId,
+      MessageType.OBJECT_DELETE,
+      { op_id: opId, id },
+      Date.now(),
+    );
+    this.rememberUserMutation(userId, opId);
+    return seq;
+  }
+
   public getObject(id: string): WhiteboardObject | undefined {
     return this.objects.get(id);
   }
@@ -723,6 +817,7 @@ export class Room {
     if (
       target.type !== MessageType.CLEAR_CANVAS &&
       target.type !== MessageType.ERASE &&
+      target.type !== MessageType.OBJECT_DELETE &&
       objectId &&
       !targetSnapshot
     ) {
@@ -744,7 +839,14 @@ export class Room {
         this.objects.set(id, this.cloneSnapshot(object));
         restoreObjects.push(this.cloneSnapshot(object));
       }
-    } else if (target.type === MessageType.ERASE) {
+    } else if (target.type === MessageType.OBJECT_UPDATE && objectId) {
+      // Restore the pre-update object; remember the current one so redo can re-apply it.
+      const before = this.undoSnapshots.get(targetOpId) as WhiteboardObject | null | undefined;
+      if (!before) return { accepted: false, message: 'No state snapshot is available to undo.' };
+      this.redoSnapshots.set(targetOpId, this.cloneSnapshot(this.objects.get(objectId) ?? null));
+      this.objects.set(objectId, this.cloneSnapshot(before));
+      restoreObjects.push(this.cloneSnapshot(before));
+    } else if (target.type === MessageType.ERASE || target.type === MessageType.OBJECT_DELETE) {
       const snapshot = (this.undoSnapshots.get(targetOpId) ?? {}) as Record<
         string,
         WhiteboardObject
@@ -826,7 +928,11 @@ export class Room {
     } else if (snapshot && typeof snapshot === 'object') {
       const entries = Object.entries(snapshot as Record<string, WhiteboardObject>);
       for (const [id, obj] of entries) {
-        if (target.type === MessageType.CLEAR_CANVAS || target.type === MessageType.ERASE) {
+        if (
+          target.type === MessageType.CLEAR_CANVAS ||
+          target.type === MessageType.ERASE ||
+          target.type === MessageType.OBJECT_DELETE
+        ) {
           this.objects.delete(id);
           removeIds.push(id);
         } else {

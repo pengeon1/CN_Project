@@ -25,6 +25,9 @@ import {
   createEnvelope,
   type CursorMovePayload,
   type ErasePayload,
+  type ObjectDeletePayload,
+  type ObjectUpdatePayload,
+  type ShapeAddPayload,
   generateUuid,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
@@ -781,6 +784,126 @@ export class WhiteboardServer {
             room.broadcast(cursorEnvelope, session.userId);
           }
         }
+        break;
+      }
+
+      case MessageType.SHAPE_ADD: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+
+        const payload = validatePayload<ShapeAddPayload>(MessageType.SHAPE_ADD, envelope.payload);
+
+        await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+          if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
+
+          const stored = room.applyShapeAdd(payload.op_id, payload.object, session.userId);
+          if (!stored) {
+            this.sendAck(
+              session,
+              envelope.msg_id,
+              'rejected',
+              undefined,
+              'Object id already in use',
+            );
+            return;
+          }
+          room.broadcast(
+            createEnvelope(
+              MessageType.SHAPE_ADD,
+              { op_id: payload.op_id, object: stored },
+              {
+                msg_id: envelope.msg_id,
+                seq: stored.seq,
+                room: room.code,
+                user_id: session.userId,
+                ts: stored.updatedAt,
+              },
+            ),
+          );
+        });
+        break;
+      }
+
+      case MessageType.OBJECT_UPDATE: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+
+        const payload = validatePayload<ObjectUpdatePayload>(
+          MessageType.OBJECT_UPDATE,
+          envelope.payload,
+        );
+
+        await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+          if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
+
+          const updated = room.applyObjectUpdate(
+            payload.op_id,
+            payload.id,
+            payload.changes,
+            session.userId,
+          );
+          if (!updated) {
+            this.sendAck(
+              session,
+              envelope.msg_id,
+              'rejected',
+              undefined,
+              'Object no longer exists',
+            );
+            return;
+          }
+          room.broadcast(
+            createEnvelope(MessageType.OBJECT_UPDATE, payload, {
+              msg_id: envelope.msg_id,
+              seq: updated.seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: updated.updatedAt,
+            }),
+          );
+        });
+        break;
+      }
+
+      case MessageType.OBJECT_DELETE: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+
+        const payload = validatePayload<ObjectDeletePayload>(
+          MessageType.OBJECT_DELETE,
+          envelope.payload,
+        );
+
+        await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+          if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
+
+          const seq = room.applyObjectDelete(payload.op_id, payload.id, session.userId);
+          if (seq === null) {
+            this.sendAck(
+              session,
+              envelope.msg_id,
+              'rejected',
+              undefined,
+              'Object no longer exists',
+            );
+            return;
+          }
+          room.broadcast(
+            createEnvelope(MessageType.OBJECT_DELETE, payload, {
+              msg_id: envelope.msg_id,
+              seq,
+              room: room.code,
+              user_id: session.userId,
+              ts: Date.now(),
+            }),
+          );
+        });
         break;
       }
 

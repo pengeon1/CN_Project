@@ -2,6 +2,7 @@
  * @fileoverview Exhaustive protocol message type definitions and envelope structures.
  */
 
+import type { ObjectChanges } from '../protocol/objects.js';
 import type { Role } from './roles.js';
 import type {
   ChatMessage,
@@ -222,7 +223,7 @@ export interface ShapeAddPayload {
 export interface ObjectUpdatePayload {
   op_id: string;
   id: string;
-  changes: Partial<WhiteboardObject>;
+  changes: ObjectChanges;
 }
 
 export interface ObjectDeletePayload {

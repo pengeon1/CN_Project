@@ -36,6 +36,12 @@ import {
   type RoomSnapshot,
   type RoomStatePayload,
   type SequencedOperation,
+  type ObjectChanges,
+  type ObjectDeletePayload,
+  type ObjectUpdatePayload,
+  type ShapeAddPayload,
+  type ShapeObject,
+  applyObjectChanges,
   type StrokeBeginPayload,
   type StrokeEndPayload,
   type StrokeObject,
@@ -97,6 +103,7 @@ export interface WhiteboardState {
   // Whiteboard canvas objects & cursors
   objects: Record<string, WhiteboardObject>;
   liveLocalStroke: StrokeObject | null;
+  selectedIds: string[];
   remoteCursors: Record<string, RemoteCursor>;
   lastAppliedSeq: number;
 
@@ -161,6 +168,15 @@ export interface WhiteboardState {
   finishDrawing: (finalPoint?: Point) => void;
   broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
   eraseObjects: (objectIds: string[]) => void;
+  setSelectedIds: (ids: string[]) => void;
+  /** Adds a shape/text/sticky note optimistically and sends SHAPE_ADD. Returns its id. */
+  addShape: (
+    shape: Omit<ShapeObject, 'id' | 'authorId' | 'seq' | 'zIndex' | 'updatedAt' | 'type'>,
+  ) => string | null;
+  /** Applies `changesFor(obj)` to each object (optimistic) and sends one OBJECT_UPDATE each. */
+  updateObjects: (ids: string[], changesFor: (obj: WhiteboardObject) => ObjectChanges) => void;
+  deleteObjects: (ids: string[]) => void;
+  reorderObjects: (ids: string[], direction: 'front' | 'back') => void;
   clearCanvas: () => void;
   /**
    * Manually asks the server for everything after `lastSeq`. Gap recovery is normally automatic
@@ -253,6 +269,24 @@ export function applySequencedOpToObjects(
       break;
     }
 
+    case MessageType.SHAPE_ADD: {
+      const p = op.payload as ShapeAddPayload;
+      objects[p.object.id] = { ...p.object, seq: op.seq };
+      break;
+    }
+
+    case MessageType.OBJECT_UPDATE: {
+      const p = op.payload as ObjectUpdatePayload;
+      const obj = objects[p.id];
+      if (obj) objects[p.id] = applyObjectChanges(obj, p.changes, op.seq, op.ts);
+      break;
+    }
+
+    case MessageType.OBJECT_DELETE: {
+      delete objects[(op.payload as ObjectDeletePayload).id];
+      break;
+    }
+
     case MessageType.ERASE: {
       const p = op.payload as ErasePayload;
       for (const id of p.objectIds) {
@@ -282,6 +316,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   objects: {},
   liveLocalStroke: null,
+  selectedIds: [],
   remoteCursors: {},
   lastAppliedSeq: 0,
   undoStack: [],
@@ -843,6 +878,119 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     }
   },
 
+  setSelectedIds: (ids) => set({ selectedIds: ids }),
+
+  addShape: (shape) => {
+    const { currentUser, roomInfo, objects } = get();
+    if (!currentUser || !roomInfo) return null;
+    if (!canMutateCanvas(currentUser.role)) return null;
+    if (roomInfo.locked && currentUser.role !== Role.HOST) return null;
+
+    const id = generateUuid();
+    const op_id = generateUuid();
+    const top = Object.values(objects).reduce((m, o) => Math.max(m, o.zIndex), 0);
+    const object: ShapeObject = {
+      ...shape,
+      id,
+      type: 'shape',
+      authorId: currentUser.id,
+      seq: 0,
+      zIndex: top + 1,
+      updatedAt: Date.now(),
+    };
+    set((state) => ({
+      objects: { ...state.objects, [id]: object },
+      undoStack: [...state.undoStack, op_id],
+      redoStack: [],
+    }));
+    getElectronAPI()?.sendMessage(
+      createEnvelope(
+        MessageType.SHAPE_ADD,
+        { op_id, object },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+    return id;
+  },
+
+  updateObjects: (ids, changesFor) => {
+    const { currentUser, roomInfo } = get();
+    if (!currentUser || !roomInfo || !canMutateCanvas(currentUser.role)) return;
+    if (roomInfo.locked && currentUser.role !== Role.HOST) return;
+
+    for (const id of ids) {
+      const obj = get().objects[id];
+      if (!obj) continue;
+      const changes = changesFor(obj);
+      if (Object.keys(changes).length === 0) continue;
+      const op_id = generateUuid();
+      set((state) => ({
+        objects: {
+          ...state.objects,
+          [id]: applyObjectChanges(obj, changes, obj.seq, Date.now()),
+        },
+        undoStack: [...state.undoStack, op_id],
+        redoStack: [],
+      }));
+      getElectronAPI()?.sendMessage(
+        createEnvelope(
+          MessageType.OBJECT_UPDATE,
+          { op_id, id, changes },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
+
+  deleteObjects: (ids) => {
+    const { currentUser, roomInfo } = get();
+    if (!currentUser || !roomInfo || !canMutateCanvas(currentUser.role)) return;
+    if (roomInfo.locked && currentUser.role !== Role.HOST) return;
+
+    for (const id of ids) {
+      if (!get().objects[id]) continue;
+      const op_id = generateUuid();
+      set((state) => {
+        const nextObjects = { ...state.objects };
+        delete nextObjects[id];
+        return {
+          objects: nextObjects,
+          selectedIds: state.selectedIds.filter((s) => s !== id),
+          undoStack: [...state.undoStack, op_id],
+          redoStack: [],
+        };
+      });
+      getElectronAPI()?.sendMessage(
+        createEnvelope(
+          MessageType.OBJECT_DELETE,
+          { op_id, id },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
+
+  reorderObjects: (ids, direction) => {
+    // Absolute zIndex values keep the operation idempotent and last-writer-wins safe.
+    const all = Object.values(get().objects);
+    if (all.length === 0) return;
+    let next =
+      direction === 'front'
+        ? Math.max(...all.map((o) => o.zIndex))
+        : Math.min(...all.map((o) => o.zIndex));
+    const ordered = ids
+      .map((id) => get().objects[id])
+      .filter((o): o is WhiteboardObject => Boolean(o))
+      .sort((a, b) => a.zIndex - b.zIndex);
+    if (direction === 'back') ordered.reverse();
+    const zFor = new Map<string, number>();
+    for (const o of ordered) {
+      next += direction === 'front' ? 1 : -1;
+      zFor.set(o.id, next);
+    }
+    get().updateObjects(ids, (o) => ({ zIndex: zFor.get(o.id) ?? o.zIndex }));
+  },
+
   clearCanvas: () => {
     const { currentUser, roomInfo } = get();
     if (currentUser && !isHost(currentUser.role)) return;
@@ -1282,6 +1430,46 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           const newEntries = (payload.messages || []).filter((m) => !existingIds.has(m.id));
           return {
             chatMessages: [...state.chatMessages, ...newEntries],
+          };
+        });
+        break;
+      }
+
+      case MessageType.SHAPE_ADD: {
+        const payload = envelope.payload as ShapeAddPayload;
+        set((state) => ({
+          objects: {
+            ...state.objects,
+            [payload.object.id]: { ...payload.object, seq: envelope.seq },
+          },
+        }));
+        break;
+      }
+
+      case MessageType.OBJECT_UPDATE: {
+        const payload = envelope.payload as ObjectUpdatePayload;
+        set((state) => {
+          const obj = state.objects[payload.id];
+          if (!obj) return state;
+          return {
+            objects: {
+              ...state.objects,
+              [payload.id]: applyObjectChanges(obj, payload.changes, envelope.seq, envelope.ts),
+            },
+          };
+        });
+        break;
+      }
+
+      case MessageType.OBJECT_DELETE: {
+        const payload = envelope.payload as ObjectDeletePayload;
+        set((state) => {
+          if (!state.objects[payload.id]) return state;
+          const nextObjects = { ...state.objects };
+          delete nextObjects[payload.id];
+          return {
+            objects: nextObjects,
+            selectedIds: state.selectedIds.filter((id) => id !== payload.id),
           };
         });
         break;

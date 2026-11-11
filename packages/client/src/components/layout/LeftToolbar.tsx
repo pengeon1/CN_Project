@@ -10,6 +10,7 @@ import {
   Eraser,
   Image as ImageIcon,
   MoreHorizontal,
+  Minus,
   MousePointer2,
   Pencil,
   Square,
@@ -35,7 +36,8 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: 'ellipse', label: 'Ellipse (O)', icon: Circle },
   { id: 'text', label: 'Text (T)', icon: Type },
   { id: 'sticky_note', label: 'Sticky Note (S)', icon: StickyNote },
-  { id: 'arrow', label: 'Arrow / Line (L)', icon: ArrowUpRight },
+  { id: 'arrow', label: 'Arrow (L)', icon: ArrowUpRight },
+  { id: 'line', label: 'Line (N)', icon: Minus },
 ];
 
 export const LeftToolbar: React.FC = () => {

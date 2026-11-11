@@ -4,7 +4,7 @@
  * search button, chat toggle with unread counter, and prominent Share button.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -20,8 +20,10 @@ import {
   Save,
 } from 'lucide-react';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import { exportBoardPdf, exportBoardPng } from '../../export/boardExport.js';
 
 export const TopBar: React.FC = () => {
+  const [exportOpen, setExportOpen] = useState(false);
   const {
     roomInfo,
     persistenceStatus,
@@ -138,14 +140,36 @@ export const TopBar: React.FC = () => {
                 </button>
               </>
             )}
-            <button
-              onClick={() => void exportBoard()}
-              title="Export board as JSON"
-              className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
-            >
-              <Download className="h-4 w-4" />
-              Export
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setExportOpen((o) => !o)}
+                title="Export the board"
+                className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+              >
+                <Download className="h-4 w-4" />
+                Export
+              </button>
+              {exportOpen && (
+                <div className="absolute right-0 top-9 z-50 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                  {[
+                    ['PNG image', () => void exportBoardPng()],
+                    ['PDF document', () => void exportBoardPdf()],
+                    ['Board data (.json)', () => void exportBoard()],
+                  ].map(([label, run]) => (
+                    <button
+                      key={label as string}
+                      onClick={() => {
+                        setExportOpen(false);
+                        (run as () => void)();
+                      }}
+                      className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {label as string}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </>
         )}
 

@@ -9,6 +9,7 @@ import type {
   Participant,
   Point,
   RoomSnapshot,
+  ImageObject,
   ShapeObject,
   WhiteboardObject,
 } from './whiteboard.js';
@@ -41,6 +42,10 @@ export const MessageType = {
   SHAPE_ADD: 'SHAPE_ADD',
   OBJECT_UPDATE: 'OBJECT_UPDATE',
   OBJECT_DELETE: 'OBJECT_DELETE',
+  IMAGE_UPLOAD: 'IMAGE_UPLOAD',
+  IMAGE_ADD: 'IMAGE_ADD',
+  IMAGE_REQUEST: 'IMAGE_REQUEST',
+  IMAGE_DATA: 'IMAGE_DATA',
   ERASE: 'ERASE',
   CLEAR_CANVAS: 'CLEAR_CANVAS',
   UNDO: 'UNDO',
@@ -218,6 +223,24 @@ export interface StrokeEndPayload {
 export interface ShapeAddPayload {
   op_id: string;
   object: ShapeObject;
+}
+
+/** One chunk of an image travelling client -> server. `data` is base64 of the raw bytes. */
+export interface ImageChunkPayload {
+  assetId: string;
+  mime: ImageObject['mime'];
+  index: number;
+  total: number;
+  data: string;
+}
+
+export interface ImageAddPayload {
+  op_id: string;
+  object: ImageObject;
+}
+
+export interface ImageRequestPayload {
+  assetId: string;
 }
 
 export interface ObjectUpdatePayload {

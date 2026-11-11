@@ -102,6 +102,28 @@ export const MAX_OPS_LOG_SIZE = 1000;
 export const COMPACT_RETAIN_OPS = 500;
 
 /**
+ * Largest accepted image after client-side downscaling/re-encoding (decoded bytes).
+ * Clients shrink to fit; the server enforces it again because it never trusts the client.
+ */
+export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Raw bytes carried per IMAGE_UPLOAD / IMAGE_DATA chunk (base64 inflates it by ~4/3), far below
+ * the 8 MB frame limit so chunks interleave with drawing traffic instead of blocking it.
+ */
+export const IMAGE_CHUNK_BYTES = 48 * 1024;
+
+/**
+ * Total decoded image bytes one room may hold, bounding server memory and the save file.
+ */
+export const MAX_ROOM_IMAGE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Longest side, in pixels, that clients downscale inserted images to.
+ */
+export const MAX_IMAGE_DIMENSION = 1600;
+
+/**
  * Standard palette of distinct participant cursor and avatar colors.
  */
 export const PARTICIPANT_COLORS = [

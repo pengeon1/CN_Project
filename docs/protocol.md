@@ -554,6 +554,59 @@ Updates attributes (position, size, color, content) of an existing object.
 - _Undo._ Undoing `SHAPE_ADD` removes the object; undoing `OBJECT_UPDATE` restores the pre-update object; undoing `OBJECT_DELETE` restores it. Redo reverses each. Undo restores the whole previous object, so if another user edited the same object after your change, your undo also reverts their edit (documented limitation).
 - Drags (move/resize) show a local preview and send **one** `OBJECT_UPDATE` on release, so one drag is one undo step.
 
+#### Images: `IMAGE_UPLOAD`, `IMAGE_ADD`, `IMAGE_REQUEST`, `IMAGE_DATA` (Phase 13)
+
+Image bytes never travel inside the ops log or snapshots. An image is an object (`type: "image"`) holding metadata plus an `assetId`; the bytes are a server-side asset moved in chunks well below the 8 MB frame limit so they interleave with drawing traffic.
+
+1. **Client prepares the file**: decodes it, downscales so the longer side is at most 1600 px, and re-encodes it (PNG if it fits, else JPEG at falling quality) to at most **2 MB**.
+2. **`IMAGE_UPLOAD`** (client -> server, unsequenced), one per 48 KB chunk. Requires edit rights. `data` is base64.
+
+```json
+{
+  "type": "IMAGE_UPLOAD",
+  "payload": {
+    "assetId": "<uuid>",
+    "mime": "image/png",
+    "index": 0,
+    "total": 3,
+    "data": "iVBORw0KGgo..."
+  }
+}
+```
+
+3. **`IMAGE_ADD`** (client -> server -> broadcast, **sequenced and reliable**), sent after the chunks. The server accepts it only if the asset is fully stored and the `mime` matches; like `SHAPE_ADD` it overwrites `authorId`, `zIndex` and `seq`, and sets `bytes` from the stored asset.
+
+```json
+{
+  "type": "IMAGE_ADD",
+  "seq": 152,
+  "payload": {
+    "op_id": "<uuid>",
+    "object": {
+      "id": "<uuid>",
+      "type": "image",
+      "assetId": "<uuid>",
+      "mime": "image/png",
+      "bytes": 98000,
+      "x": 10,
+      "y": 20,
+      "width": 200,
+      "height": 100,
+      "authorId": "<uuid>",
+      "seq": 152,
+      "zIndex": 3,
+      "updatedAt": 1730644850000
+    }
+  }
+}
+```
+
+4. **`IMAGE_REQUEST`** (client -> server). Any room member, viewers included, sends it for each image on the board whose bytes it lacks (after `IMAGE_ADD`, a late join, a resync or a reconnect; retried after 8 s if incomplete). The server answers with **`IMAGE_DATA`** chunks (same shape as `IMAGE_UPLOAD`, unsequenced) or an `ERROR` with code `IMAGE_NOT_FOUND`. Until the bytes arrive the client shows a "Loading image…" placeholder at the correct position.
+
+Server-side validation: each chunk is schema-checked (base64, size, index range); at most 8 uploads in flight per room; the assembled file must be <= 2 MB, must start with the PNG/JPEG/WebP magic bytes for its declared `mime`, and the room's total image storage is capped at 64 MB. Violations produce `ERROR` code `IMAGE_REJECTED` and discard the partial upload. Unfinished uploads are dropped when their sender disconnects. Image objects move/resize through the normal `OBJECT_UPDATE` (`x, y, width, height, zIndex`), delete via `OBJECT_DELETE`/`ERASE`, and undo/redo like shapes. Assets are written into the room's autosave file, so images survive a server restart.
+
+**Export** is client-side only (no protocol traffic): _Export > PNG_ and _PDF_ render the whole board, cropped to its content, using the same renderers as the live canvas. The PDF is a one-page document embedding a JPEG of that render.
+
 #### `OBJECT_DELETE` / `ERASE` (Client -> Server -> Broadcast)
 
 `OBJECT_DELETE` removes one object (`{ "op_id", "id" }`, used by Delete key / selection delete); `ERASE` removes several by ID (eraser tool). Both are undoable.

@@ -135,7 +135,9 @@ export const PropertyBar: React.FC = () => {
   // Line-only and text-only selections have no meaningful stroke width.
   const showWidth = editingSelection
     ? selection.some(
-        (o) => o.type === 'stroke' || (o.shapeType !== 'text' && o.shapeType !== 'sticky_note'),
+        (o) =>
+          o.type === 'stroke' ||
+          (o.type === 'shape' && o.shapeType !== 'text' && o.shapeType !== 'sticky_note'),
       )
     : activeTool !== 'text' && activeTool !== 'sticky_note';
 

@@ -3,7 +3,7 @@
  * Houses tool selectors: select, pen, eraser, shapes, text, sticky note, line/arrow, image.
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   ArrowUpRight,
   Circle,
@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { canMutateCanvas, isHost } from '@cn-whiteboard/common';
 import { type CanvasTool, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import { insertImageFile } from '../canvas/imageInsert.js';
 
 interface ToolItem {
   id: CanvasTool;
@@ -43,6 +44,7 @@ const PRIMARY_TOOLS: ToolItem[] = [
 export const LeftToolbar: React.FC = () => {
   const { activeTool, setActiveTool, currentUser, roomInfo, setClearModalOpen } =
     useWhiteboardStore();
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const canEdit =
     !currentUser ||
     (canMutateCanvas(currentUser.role) && (!roomInfo?.locked || isHost(currentUser.role)));
@@ -75,9 +77,22 @@ export const LeftToolbar: React.FC = () => {
 
       <div className="my-0.5 h-[1px] w-5 bg-slate-800" />
 
-      {/* Image Insertion Placeholder */}
+      {/* Image insertion: file picker (drag-drop and paste also work on the canvas) */}
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) void insertImageFile(file);
+        }}
+      />
       <button
-        title="Insert Image"
+        onClick={() => fileInput.current?.click()}
+        disabled={!canEdit}
+        title={canEdit ? 'Insert Image (or drop / paste one)' : 'Insert Image (read-only)'}
         className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
       >
         <ImageIcon className="h-4 w-4" />

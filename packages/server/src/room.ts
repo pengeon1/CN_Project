@@ -27,6 +27,11 @@ import {
   Role,
   type RoomSnapshot,
   type SequencedOperation,
+  type ImageChunkPayload,
+  type ImageObject,
+  IMAGE_CHUNK_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_ROOM_IMAGE_BYTES,
   type ObjectChanges,
   type ShapeObject,
   type StrokeObject,
@@ -64,6 +69,23 @@ export interface PersistedRoomState {
   userRedoStacks: Record<string, string[]>;
   undoSnapshots: Record<string, WhiteboardObject | Record<string, WhiteboardObject> | null>;
   redoSnapshots: Record<string, WhiteboardObject | Record<string, WhiteboardObject> | null>;
+  /** Image assets by id (base64 bytes), so uploaded pictures survive a server restart. */
+  assets?: Record<string, StoredAsset>;
+}
+
+/** A fully received image asset. */
+export interface StoredAsset {
+  mime: ImageObject['mime'];
+  data: string;
+}
+
+/** An image still arriving in chunks. */
+interface PendingUpload {
+  userId: string;
+  mime: ImageObject['mime'];
+  total: number;
+  chunks: Array<string | undefined>;
+  received: number;
 }
 
 /**
@@ -134,6 +156,9 @@ export class Room {
     new Map();
   private redoSnapshots: Map<string, WhiteboardObject | Record<string, WhiteboardObject> | null> =
     new Map();
+  private assets: Map<string, StoredAsset> = new Map();
+  private pendingUploads: Map<string, PendingUpload> = new Map();
+  private assetBytes = 0;
   private colorIndex: number = 0;
   private serialQueue: Promise<void> = Promise.resolve();
   private logger: Logger;
@@ -404,6 +429,7 @@ export class Room {
       redoSnapshots: Object.fromEntries(
         Array.from(this.redoSnapshots, ([id, snapshot]) => [id, this.cloneSnapshot(snapshot)]),
       ),
+      assets: Object.fromEntries(this.assets),
     };
   }
 
@@ -465,6 +491,17 @@ export class Room {
         this.cloneSnapshot(snapshot),
       ]),
     );
+    // A manual LOAD keeps assets already held (live clients may still reference them).
+    if (!options.preserveSequence) {
+      this.assets = new Map();
+      this.assetBytes = 0;
+    }
+    for (const [id, asset] of Object.entries(state.assets ?? {})) {
+      if (!this.assets.has(id)) {
+        this.assets.set(id, asset);
+        this.assetBytes += Buffer.byteLength(asset.data, 'base64');
+      }
+    }
   }
 
   /**
@@ -621,6 +658,97 @@ export class Room {
     let max = 0;
     for (const obj of this.objects.values()) max = Math.max(max, obj.zIndex);
     return max;
+  }
+
+  /**
+   * Accepts one chunk of an image upload and assembles the asset when the last chunk arrives.
+   * Size, quota and file signature are all verified here, not trusted from the client.
+   *
+   * @returns 'partial' while chunks are missing, 'complete' once stored, otherwise an error text.
+   */
+  public receiveImageChunk(
+    userId: string,
+    chunk: ImageChunkPayload,
+  ): 'partial' | 'complete' | { error: string } {
+    if (this.assets.has(chunk.assetId)) return 'complete'; // duplicate upload, already stored
+    let up = this.pendingUploads.get(chunk.assetId);
+    if (!up) {
+      if (this.pendingUploads.size >= 8) return { error: 'Too many uploads in progress' };
+      up = {
+        userId,
+        mime: chunk.mime,
+        total: chunk.total,
+        chunks: new Array<string | undefined>(chunk.total).fill(undefined),
+        received: 0,
+      };
+      this.pendingUploads.set(chunk.assetId, up);
+    }
+    if (up.userId !== userId || up.total !== chunk.total || up.mime !== chunk.mime) {
+      return { error: 'Inconsistent upload chunk' };
+    }
+    if (chunk.index >= up.total) return { error: 'Chunk index out of range' };
+    if (up.chunks[chunk.index] === undefined) {
+      up.chunks[chunk.index] = chunk.data;
+      up.received += 1;
+    }
+    if (up.received < up.total) return 'partial';
+
+    this.pendingUploads.delete(chunk.assetId);
+    const data = up.chunks.join('');
+    const bytes = Buffer.from(data, 'base64');
+    if (bytes.length > MAX_IMAGE_BYTES || bytes.length > IMAGE_CHUNK_BYTES * up.total) {
+      return { error: 'Image is too large' };
+    }
+    if (this.assetBytes + bytes.length > MAX_ROOM_IMAGE_BYTES) {
+      return { error: 'Room image storage is full' };
+    }
+    if (!matchesImageSignature(bytes, up.mime)) {
+      return { error: 'File content does not match its image type' };
+    }
+    this.assets.set(chunk.assetId, { mime: up.mime, data });
+    this.assetBytes += bytes.length;
+    return 'complete';
+  }
+
+  /** Drops unfinished uploads of a user who disconnected, freeing the memory they held. */
+  public dropPendingUploads(userId: string): void {
+    for (const [id, up] of this.pendingUploads) {
+      if (up.userId === userId) this.pendingUploads.delete(id);
+    }
+  }
+
+  public getAsset(assetId: string): StoredAsset | undefined {
+    return this.assets.get(assetId);
+  }
+
+  /**
+   * Adds an image object whose bytes were already uploaded. Authorship, z-order and seq are
+   * server-assigned exactly as for shapes.
+   *
+   * @returns The stored object, or null when the asset is missing or the id is taken.
+   */
+  public applyImageAdd(opId: string, object: ImageObject, userId: string): ImageObject | null {
+    if (this.hasProcessedOp(opId)) {
+      const existing = this.objects.get(object.id);
+      return existing && existing.type === 'image' ? existing : null;
+    }
+    const asset = this.assets.get(object.assetId);
+    if (!asset || asset.mime !== object.mime || this.objects.has(object.id)) return null;
+
+    const ts = Date.now();
+    const stored = normalizeNewShape(object, userId, this.maxZIndex() + 1, 0, ts);
+    stored.bytes = Buffer.byteLength(asset.data, 'base64');
+    this.undoSnapshots.set(opId, null);
+    stored.seq = this.commit(
+      opId,
+      userId,
+      MessageType.IMAGE_ADD,
+      { op_id: opId, object: stored },
+      ts,
+    );
+    this.objects.set(stored.id, stored);
+    this.rememberUserMutation(userId, opId);
+    return stored;
   }
 
   /**
@@ -1164,6 +1292,7 @@ export class Room {
     if (!entry) return null;
     if (session && entry.session !== session) return null;
 
+    this.dropPendingUploads(userId);
     this.participants.delete(userId);
     this.disconnectedParticipants.set(userId, entry.participant);
     entry.session.roomCode = null;
@@ -1336,4 +1465,15 @@ export class Room {
       createdAt: this.createdAt,
     };
   }
+}
+
+/** Checks the file's magic bytes so a client cannot label arbitrary data as an image. */
+function matchesImageSignature(bytes: Buffer, mime: ImageObject['mime']): boolean {
+  if (mime === 'image/png')
+    return bytes.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  if (mime === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  return (
+    bytes.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    bytes.subarray(8, 12).toString('latin1') === 'WEBP'
+  );
 }

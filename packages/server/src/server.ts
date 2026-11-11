@@ -25,6 +25,10 @@ import {
   createEnvelope,
   type CursorMovePayload,
   type ErasePayload,
+  type ImageAddPayload,
+  type ImageChunkPayload,
+  IMAGE_CHUNK_BYTES,
+  type ImageRequestPayload,
   type ObjectDeletePayload,
   type ObjectUpdatePayload,
   type ShapeAddPayload,
@@ -783,6 +787,91 @@ export class WhiteboardServer {
             // Ephemeral broadcast to peers, skipping sender
             room.broadcast(cursorEnvelope, session.userId);
           }
+        }
+        break;
+      }
+
+      case MessageType.IMAGE_UPLOAD: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+
+        const payload = validatePayload<ImageChunkPayload>(
+          MessageType.IMAGE_UPLOAD,
+          envelope.payload,
+        );
+        await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+          const result = room.receiveImageChunk(session.userId, payload);
+          if (typeof result === 'object') {
+            room.dropPendingUploads(session.userId);
+            this.sendError(session, 'IMAGE_REJECTED', result.error, envelope, room.code);
+          }
+        });
+        break;
+      }
+
+      case MessageType.IMAGE_ADD: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+
+        const payload = validatePayload<ImageAddPayload>(MessageType.IMAGE_ADD, envelope.payload);
+        await room.enqueue(() => {
+          if (!this.authorizeCanvasMutation(session, envelope, room)) return;
+          if (this.acknowledgeDuplicate(session, envelope, room, payload.op_id)) return;
+
+          const stored = room.applyImageAdd(payload.op_id, payload.object, session.userId);
+          if (!stored) {
+            this.sendAck(session, envelope.msg_id, 'rejected', undefined, 'Image upload missing');
+            return;
+          }
+          room.broadcast(
+            createEnvelope(
+              MessageType.IMAGE_ADD,
+              { op_id: payload.op_id, object: stored },
+              {
+                msg_id: envelope.msg_id,
+                seq: stored.seq,
+                room: room.code,
+                user_id: session.userId,
+                ts: stored.updatedAt,
+              },
+            ),
+          );
+        });
+        break;
+      }
+
+      case MessageType.IMAGE_REQUEST: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        const payload = validatePayload<ImageRequestPayload>(
+          MessageType.IMAGE_REQUEST,
+          envelope.payload,
+        );
+        // Everyone in the room (viewers included) may fetch bytes; they only see what is on the board.
+        const asset = room.getAsset(payload.assetId);
+        if (!asset) {
+          this.sendError(session, 'IMAGE_NOT_FOUND', 'Image is not available', envelope, room.code);
+          break;
+        }
+        const size = Math.ceil(IMAGE_CHUNK_BYTES / 3) * 4; // base64 chars per chunk, multiple of 4
+        const total = Math.max(1, Math.ceil(asset.data.length / size));
+        for (let index = 0; index < total; index++) {
+          session.send(
+            createEnvelope(
+              MessageType.IMAGE_DATA,
+              {
+                assetId: payload.assetId,
+                mime: asset.mime,
+                index,
+                total,
+                data: asset.data.slice(index * size, (index + 1) * size),
+              },
+              { room: room.code, user_id: session.userId },
+            ),
+          );
         }
         break;
       }

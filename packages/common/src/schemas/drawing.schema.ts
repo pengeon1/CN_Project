@@ -3,6 +3,7 @@
  */
 
 import { z } from 'zod';
+import { IMAGE_CHUNK_BYTES, MAX_IMAGE_BYTES } from '../constants.js';
 import { ShapeType } from '../types/whiteboard.js';
 
 export const PointSchema = z.object({
@@ -72,10 +73,48 @@ export const ShapeObjectSchema = BaseWhiteboardObjectSchema.extend({
   italic: z.boolean().optional(),
 });
 
+export const ImageMimeSchema = z.enum(['image/png', 'image/jpeg', 'image/webp']);
+
+export const ImageObjectSchema = BaseWhiteboardObjectSchema.extend({
+  type: z.literal('image'),
+  assetId: z.string().uuid(),
+  mime: ImageMimeSchema,
+  bytes: z.number().int().positive().max(MAX_IMAGE_BYTES),
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().finite().positive().max(100_000),
+  height: z.number().finite().positive().max(100_000),
+});
+
 export const WhiteboardObjectSchema = z.discriminatedUnion('type', [
   StrokeObjectSchema,
   ShapeObjectSchema,
+  ImageObjectSchema,
 ]);
+
+/** Base64 of IMAGE_CHUNK_BYTES is ~65.5k chars; allow headroom but cap hard. */
+export const ImageChunkPayloadSchema = z.object({
+  assetId: z.string().uuid(),
+  mime: ImageMimeSchema,
+  index: z.number().int().nonnegative(),
+  total: z
+    .number()
+    .int()
+    .positive()
+    .max(Math.ceil(MAX_IMAGE_BYTES / IMAGE_CHUNK_BYTES) + 1),
+  data: z
+    .string()
+    .min(1)
+    .max(Math.ceil(IMAGE_CHUNK_BYTES / 3) * 4 + 4)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Must be base64'),
+});
+
+export const ImageAddPayloadSchema = z.object({
+  op_id: z.string().uuid(),
+  object: ImageObjectSchema,
+});
+
+export const ImageRequestPayloadSchema = z.object({ assetId: z.string().uuid() });
 
 export const ShapeAddPayloadSchema = z.object({
   op_id: z.string().uuid(),

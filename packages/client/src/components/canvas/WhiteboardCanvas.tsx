@@ -20,6 +20,8 @@ import {
 } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { isEditableElement } from '../../hooks/useKeyboardShortcuts.js';
+import { getImageElement, renderImage } from './images.js';
+import { insertImageFile } from './imageInsert.js';
 import {
   type Bounds,
   type HandleId,
@@ -78,7 +80,7 @@ const ERASER_RADIUS = 16;
 /**
  * Renders a single freehand stroke onto the 2D canvas using perfect-freehand outline polygon.
  */
-function renderStroke(
+export function renderStroke(
   ctx: CanvasRenderingContext2D,
   stroke: StrokeObject,
   isHovered = false,
@@ -212,6 +214,8 @@ export const WhiteboardCanvas: React.FC = () => {
     broadcastCursorPosition,
     eraseObjects,
     selectedIds,
+    imageData,
+    ensureImages,
     setSelectedIds,
     setActiveTool,
     addShape,
@@ -244,6 +248,7 @@ export const WhiteboardCanvas: React.FC = () => {
   const [preview, setPreview] = useState<Record<string, WhiteboardObject>>({});
   const [draft, setDraft] = useState<ShapeObject | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [imageTick, setImageTick] = useState(0);
   const [editorText, setEditorText] = useState('');
   const editorClosedRef = useRef(false);
 
@@ -386,6 +391,12 @@ export const WhiteboardCanvas: React.FC = () => {
     for (const obj of drawList) {
       if (obj.type === 'stroke') {
         renderStroke(ctx, obj, hoveredAuthor?.strokeId === obj.id);
+      } else if (obj.type === 'image') {
+        renderImage(
+          ctx,
+          obj,
+          getImageElement(obj.assetId, imageData[obj.assetId], () => setImageTick((t) => t + 1)),
+        );
       } else {
         renderShape(ctx, obj, editor?.id === obj.id);
       }
@@ -443,6 +454,8 @@ export const WhiteboardCanvas: React.FC = () => {
     draft,
     editor,
     selectedIds,
+    imageData,
+    imageTick,
   ]);
 
   // Continuously request animation frame when rendering changes
@@ -502,6 +515,7 @@ export const WhiteboardCanvas: React.FC = () => {
     c: ReturnType<typeof moveChanges>,
   ): WhiteboardObject => {
     if (o.type === 'stroke') return c.points ? { ...o, points: c.points } : o;
+    if (o.type === 'image') return { ...o, ...c } as WhiteboardObject;
     return { ...o, ...c, fillColor: o.fillColor } as ShapeObject;
   };
 
@@ -568,6 +582,36 @@ export const WhiteboardCanvas: React.FC = () => {
       if (id) setSelectedIds([id]);
       setActiveTool('select');
     }
+  };
+
+  // Fetch bytes for any image on the board we do not have yet (late join, resync, new upload).
+  useEffect(() => {
+    ensureImages();
+    const timer = setInterval(ensureImages, 5000);
+    return () => clearInterval(timer);
+  }, [objects, ensureImages]);
+
+  // Paste an image from the clipboard
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (isEditableElement(e.target)) return;
+      const file = Array.from(e.clipboardData?.files ?? []).find((f) =>
+        f.type.startsWith('image/'),
+      );
+      if (file) {
+        e.preventDefault();
+        void insertImageFile(file);
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith('image/'));
+    if (!file) return;
+    e.preventDefault();
+    void insertImageFile(file, screenToWorld(e.clientX, e.clientY));
   };
 
   // Delete / Escape on the canvas (ignored while typing in any input or the inline editor)
@@ -889,6 +933,8 @@ export const WhiteboardCanvas: React.FC = () => {
       onPointerCancel={handlePointerCancel}
       onWheel={handleWheel}
       onDoubleClick={handleDoubleClick}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={handleDrop}
       className={`relative h-full w-full overflow-hidden touch-none ${
         isPanning
           ? 'cursor-grab active:cursor-grabbing'

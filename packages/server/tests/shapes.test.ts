@@ -119,3 +119,25 @@ describe('Phase 12 shapes (server state)', () => {
     }
   });
 });
+
+describe('Phase 13 image assets (persistence)', () => {
+  it('keeps uploaded image bytes across a persisted-state restore', () => {
+    const owner = generateUuid();
+    const room = new Room('ABC234', 'r', owner);
+    const assetId = generateUuid();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const result = room.receiveImageChunk(owner, {
+      assetId,
+      mime: 'image/png',
+      index: 0,
+      total: 1,
+      data: png.toString('base64'),
+    });
+    expect(result).toBe('complete');
+    const revived = new Room('ABC234', 'r', owner);
+    revived.restorePersistedState(JSON.parse(JSON.stringify(room.getPersistedState())), {
+      restoredFromDisk: true,
+    });
+    expect(Buffer.from(revived.getAsset(assetId)!.data, 'base64').equals(png)).toBe(true);
+  });
+});

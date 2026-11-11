@@ -10,7 +10,7 @@
  * re-application of an echoed operation idempotent.
  */
 
-import type { Point, ShapeObject, WhiteboardObject } from '../types/whiteboard.js';
+import type { ImageObject, Point, ShapeObject, WhiteboardObject } from '../types/whiteboard.js';
 
 /**
  * Properties that may be changed by OBJECT_UPDATE. `null` removes an optional property.
@@ -73,6 +73,10 @@ export function applyObjectChanges(
     }
     if (changes.fillColor === null) delete next.fillColor;
     else if (changes.fillColor !== undefined) next.fillColor = changes.fillColor;
+  } else if (obj.type === 'image') {
+    for (const key of ['x', 'y', 'width', 'height'] as const) {
+      if (changes[key] !== undefined) next[key] = changes[key];
+    }
   } else {
     if (changes.color !== undefined) next.color = changes.color;
     if (changes.strokeWidth !== undefined) next.width = changes.strokeWidth;
@@ -87,12 +91,12 @@ export function applyObjectChanges(
 /**
  * Normalizes a newly added shape: the server (not the client) decides authorship, z-order and seq.
  */
-export function normalizeNewShape(
-  object: ShapeObject,
+export function normalizeNewShape<T extends ShapeObject | ImageObject>(
+  object: T,
   authorId: string,
   zIndex: number,
   seq: number,
   ts: number,
-): ShapeObject {
+): T {
   return { ...object, authorId, zIndex, seq, updatedAt: ts };
 }

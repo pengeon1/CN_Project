@@ -8,6 +8,7 @@
  */
 
 import type {
+  ImageObject,
   ObjectChanges,
   ShapeObject,
   StrokeObject,
@@ -111,6 +112,12 @@ export function hitTest(obj: WhiteboardObject, px: number, py: number, tol: numb
       tol + obj.strokeWidth / 2
     );
   }
+  if (obj.type === 'image') {
+    const ib = getBounds(obj);
+    return (
+      px >= ib.x - tol && px <= ib.x + ib.w + tol && py >= ib.y - tol && py <= ib.y + ib.h + tol
+    );
+  }
   const b = getBounds(obj);
   const solid =
     obj.fillColor !== undefined || obj.shapeType === 'text' || obj.shapeType === 'sticky_note';
@@ -153,7 +160,7 @@ export function pickHandle(
   py: number,
   zoom: number,
 ): HandleId | null {
-  if (obj.type !== 'shape' || isLinear(obj)) return null;
+  if (obj.type === 'stroke' || isLinear(obj)) return null;
   const b = getBounds(obj);
   const r = (HANDLE_SIZE / zoom) * 1.2;
   const corners: Record<HandleId, [number, number]> = {
@@ -171,7 +178,7 @@ export function pickHandle(
 
 /** Geometry change produced by dragging a corner handle to (px, py). Keeps a 12 unit minimum. */
 export function resizeChanges(
-  obj: ShapeObject,
+  obj: ShapeObject | ImageObject,
   handle: HandleId,
   px: number,
   py: number,
@@ -199,6 +206,7 @@ export function moveChanges(obj: WhiteboardObject, dx: number, dy: number): Obje
 /** Changes that apply a chosen color to the right property of each object kind. */
 export function colorChanges(obj: WhiteboardObject, color: string): ObjectChanges {
   if (obj.type === 'stroke') return { color };
+  if (obj.type === 'image') return {};
   if (obj.shapeType === 'sticky_note') return { strokeColor: color, fillColor: stickyFill(color) };
   return { strokeColor: color };
 }
@@ -335,7 +343,7 @@ export function renderSelection(
   ctx.setLineDash([5 / zoom, 3 / zoom]);
   ctx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2);
   ctx.setLineDash([]);
-  if (withHandles && obj.type === 'shape' && !isLinear(obj)) {
+  if (withHandles && obj.type !== 'stroke' && !isLinear(obj)) {
     const hs = HANDLE_SIZE / zoom;
     ctx.fillStyle = '#FFFFFF';
     for (const [cx, cy] of [

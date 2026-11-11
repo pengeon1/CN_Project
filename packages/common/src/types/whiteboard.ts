@@ -101,9 +101,25 @@ export interface ShapeObject extends BaseWhiteboardObject {
 }
 
 /**
+ * Raster image. Only metadata lives in the object; the bytes are an asset on the server, fetched
+ * by `assetId`, so snapshots and the ops log stay small.
+ */
+export interface ImageObject extends BaseWhiteboardObject {
+  type: 'image';
+  assetId: string;
+  mime: 'image/png' | 'image/jpeg' | 'image/webp';
+  /** Decoded size in bytes (informational, checked against the stored asset). */
+  bytes: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
  * Discriminated union of all whiteboard canvas objects.
  */
-export type WhiteboardObject = StrokeObject | ShapeObject;
+export type WhiteboardObject = StrokeObject | ShapeObject | ImageObject;
 
 /**
  * Represents a connected user in a session room.

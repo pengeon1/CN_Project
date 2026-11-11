@@ -39,6 +39,14 @@ const PersistedRoomSchema = z.object({
   userRedoStacks: z.record(z.array(z.string().uuid())),
   undoSnapshots: z.record(SnapshotValueSchema),
   redoSnapshots: z.record(SnapshotValueSchema),
+  assets: z
+    .record(
+      z.object({
+        mime: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+        data: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 function hasErrorCode(error: unknown, code: string): boolean {

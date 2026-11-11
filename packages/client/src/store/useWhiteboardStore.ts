@@ -36,6 +36,10 @@ import {
   type RoomSnapshot,
   type RoomStatePayload,
   type SequencedOperation,
+  IMAGE_CHUNK_BYTES,
+  type ImageAddPayload,
+  type ImageChunkPayload,
+  type ImageObject,
   type ObjectChanges,
   type ObjectDeletePayload,
   type ObjectUpdatePayload,
@@ -104,6 +108,8 @@ export interface WhiteboardState {
   objects: Record<string, WhiteboardObject>;
   liveLocalStroke: StrokeObject | null;
   selectedIds: string[];
+  /** assetId -> data: URL of every image whose bytes have arrived. */
+  imageData: Record<string, string>;
   remoteCursors: Record<string, RemoteCursor>;
   lastAppliedSeq: number;
 
@@ -169,6 +175,19 @@ export interface WhiteboardState {
   broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
   eraseObjects: (objectIds: string[]) => void;
   setSelectedIds: (ids: string[]) => void;
+  /** Uploads image bytes in chunks, then adds the image object (optimistically shown). */
+  addImage: (image: {
+    assetId: string;
+    mime: ImageObject['mime'];
+    base64: string;
+    bytes: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  }) => boolean;
+  /** Requests bytes for every image on the board that has none yet (retries slow ones). */
+  ensureImages: () => void;
   /** Adds a shape/text/sticky note optimistically and sends SHAPE_ADD. Returns its id. */
   addShape: (
     shape: Omit<ShapeObject, 'id' | 'authorId' | 'seq' | 'zIndex' | 'updatedAt' | 'type'>,
@@ -191,6 +210,11 @@ function getElectronAPI() {
   }
   return undefined;
 }
+
+/** Image chunks received so far, keyed by asset id (module-level: not render state). */
+const incomingImages = new Map<string, { parts: Array<string | undefined>; got: number }>();
+/** When bytes for an asset were last requested, to avoid duplicate requests. */
+const imageRequestedAt = new Map<string, number>();
 
 function toChatEntry(message: ChatMessage): ChatEntry {
   return {
@@ -275,6 +299,12 @@ export function applySequencedOpToObjects(
       break;
     }
 
+    case MessageType.IMAGE_ADD: {
+      const p = op.payload as ImageAddPayload;
+      objects[p.object.id] = { ...p.object, seq: op.seq };
+      break;
+    }
+
     case MessageType.OBJECT_UPDATE: {
       const p = op.payload as ObjectUpdatePayload;
       const obj = objects[p.id];
@@ -317,6 +347,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   objects: {},
   liveLocalStroke: null,
   selectedIds: [],
+  imageData: {},
   remoteCursors: {},
   lastAppliedSeq: 0,
   undoStack: [],
@@ -879,6 +910,88 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   setSelectedIds: (ids) => set({ selectedIds: ids }),
+
+  addImage: (image) => {
+    const { currentUser, roomInfo, objects } = get();
+    if (!currentUser || !roomInfo || !canMutateCanvas(currentUser.role)) return false;
+    if (roomInfo.locked && currentUser.role !== Role.HOST) return false;
+    const api = getElectronAPI();
+    if (!api) return false;
+
+    const meta = { user_id: currentUser.id, room: roomInfo.code };
+    // base64 chunk length is a multiple of 4 so every chunk decodes on its own.
+    const size = Math.ceil(IMAGE_CHUNK_BYTES / 3) * 4;
+    const total = Math.max(1, Math.ceil(image.base64.length / size));
+    for (let index = 0; index < total; index++) {
+      void api.sendMessage(
+        createEnvelope(
+          MessageType.IMAGE_UPLOAD,
+          {
+            assetId: image.assetId,
+            mime: image.mime,
+            index,
+            total,
+            data: image.base64.slice(index * size, (index + 1) * size),
+          },
+          meta,
+        ),
+      );
+    }
+
+    const scale = Math.min(1, 480 / Math.max(image.width, image.height));
+    const width = image.width * scale;
+    const height = image.height * scale;
+    const top = Object.values(objects).reduce((m, o) => Math.max(m, o.zIndex), 0);
+    const object: ImageObject = {
+      id: generateUuid(),
+      type: 'image',
+      authorId: currentUser.id,
+      seq: 0,
+      zIndex: top + 1,
+      updatedAt: Date.now(),
+      assetId: image.assetId,
+      mime: image.mime,
+      bytes: image.bytes,
+      x: image.centerX - width / 2,
+      y: image.centerY - height / 2,
+      width,
+      height,
+    };
+    const op_id = generateUuid();
+    set((state) => ({
+      objects: { ...state.objects, [object.id]: object },
+      imageData: {
+        ...state.imageData,
+        [image.assetId]: `data:${image.mime};base64,${image.base64}`,
+      },
+      selectedIds: [object.id],
+      undoStack: [...state.undoStack, op_id],
+      redoStack: [],
+    }));
+    void api.sendMessage(createEnvelope(MessageType.IMAGE_ADD, { op_id, object }, meta));
+    return true;
+  },
+
+  ensureImages: () => {
+    const { objects, imageData, currentUser, roomInfo } = get();
+    const api = getElectronAPI();
+    if (!api || !currentUser || !roomInfo) return;
+    const now = Date.now();
+    for (const obj of Object.values(objects)) {
+      if (obj.type !== 'image' || imageData[obj.assetId]) continue;
+      const last = imageRequestedAt.get(obj.assetId) ?? 0;
+      if (now - last < 8000) continue; // request in flight; retry only if it never completed
+      imageRequestedAt.set(obj.assetId, now);
+      incomingImages.delete(obj.assetId);
+      void api.sendMessage(
+        createEnvelope(
+          MessageType.IMAGE_REQUEST,
+          { assetId: obj.assetId },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+  },
 
   addShape: (shape) => {
     const { currentUser, roomInfo, objects } = get();
@@ -1443,6 +1556,37 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             [payload.object.id]: { ...payload.object, seq: envelope.seq },
           },
         }));
+        break;
+      }
+
+      case MessageType.IMAGE_ADD: {
+        const payload = envelope.payload as ImageAddPayload;
+        set((state) => ({
+          objects: {
+            ...state.objects,
+            [payload.object.id]: { ...payload.object, seq: envelope.seq },
+          },
+        }));
+        get().ensureImages();
+        break;
+      }
+
+      case MessageType.IMAGE_DATA: {
+        const chunk = envelope.payload as ImageChunkPayload;
+        let entry = incomingImages.get(chunk.assetId);
+        if (!entry) {
+          entry = { parts: new Array<string | undefined>(chunk.total).fill(undefined), got: 0 };
+          incomingImages.set(chunk.assetId, entry);
+        }
+        if (entry.parts[chunk.index] === undefined && chunk.index < entry.parts.length) {
+          entry.parts[chunk.index] = chunk.data;
+          entry.got += 1;
+        }
+        if (entry.got === entry.parts.length) {
+          incomingImages.delete(chunk.assetId);
+          const url = `data:${chunk.mime};base64,${entry.parts.join('')}`;
+          set((state) => ({ imageData: { ...state.imageData, [chunk.assetId]: url } }));
+        }
         break;
       }
 

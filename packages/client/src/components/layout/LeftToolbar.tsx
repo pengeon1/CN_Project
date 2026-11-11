@@ -103,8 +103,16 @@ export const LeftToolbar: React.FC = () => {
 
       {/* Connector Tool */}
       <button
-        title="Connector"
-        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+        onClick={() => setActiveTool('arrow')}
+        disabled={!canEdit}
+        title={canEdit ? 'Connector / Arrow (X or L)' : 'Connector (read-only)'}
+        className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+          activeTool === 'arrow'
+            ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
+            : canEdit
+              ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              : 'cursor-not-allowed text-slate-700'
+        }`}
       >
         <Workflow className="h-4 w-4" />
       </button>

@@ -1,27 +1,44 @@
 name: Release
 
+# Push a tag like v1.0.0 to build executables on all three OSes and publish a GitHub release.
 on:
   push:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 jobs:
-  release:
-    name: Build & Release Artifacts
+  build:
+    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            server_exe: release/server/whiteboard-server-linux-x64
+            client_glob: release/client/*.AppImage
+          - os: windows-latest
+            server_exe: release/server/whiteboard-server-win-x64.exe
+            client_glob: release/client/*.exe
+          - os: macos-latest
+            server_exe: release/server/whiteboard-server-macos-arm64
+            client_glob: |
+              release/client/*.dmg
+              release/client/*.zip
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.x
           cache: 'npm'
 
       - name: Install dependencies
@@ -32,3 +49,44 @@ jobs:
           npm run lint
           npm test
           npm run build
+
+      - name: Build standalone server executable
+        run: npm run package:server
+
+      - name: Smoke-test the server executable
+        run: node scripts/smoke-server-binary.mjs ${{ matrix.server_exe }}
+
+      - name: Build desktop client installers
+        run: npm run package:client
+
+      - name: Upload server executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.os }}
+          path: release/server/*
+
+      - name: Upload client installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.os }}
+          path: ${{ matrix.client_glob }}
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+
+      - name: List files
+        run: ls -lh dist-release
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-release/*
+          generate_release_notes: true

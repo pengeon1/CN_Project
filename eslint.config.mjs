@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
+import globals from 'globals';
 
 export default tseslint.config(
   js.configs.recommended,
@@ -15,6 +16,11 @@ export default tseslint.config(
       '**/release/**',
       '**/coverage/**',
     ],
+  },
+  {
+    // Plain Node scripts (packaging, smoke tests) run outside the TypeScript projects.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node },
   },
   {
     rules: {

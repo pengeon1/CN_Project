@@ -30,6 +30,16 @@ A standalone, high-performance, real-time collaborative whiteboard built from sc
 
 ---
 
+## Downloads and standalone executables
+
+Prebuilt, no-install programs (server + desktop client for Windows, Linux and macOS) are published on the repository's **Releases** page and as CI artifacts. They need no Node.js and no internet. See [docs/packaging.md](docs/packaging.md) for how they are built, how to run them, and the first-run firewall / SmartScreen / Gatekeeper steps for unsigned apps.
+
+```bash
+npm run package:server && npm run package:client   # build them yourself
+```
+
+---
+
 ## Tech Stack
 
 | Layer              | Technology                                                               |

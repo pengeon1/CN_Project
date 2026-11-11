@@ -14,13 +14,19 @@
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "package:server": "node scripts/package-server.mjs",
+    "package:client": "npm --workspace=@cn-whiteboard/client run package",
+    "package:all": "npm run package:server && npm run package:client",
+    "smoke:server": "node scripts/smoke-server-binary.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
     "@types/node": "^20.17.6",
+    "@yao-pkg/pkg": "^6.5.1",
     "eslint": "^9.15.0",
     "eslint-config-prettier": "^9.1.0",
+    "globals": "^14.0.0",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.15.0",

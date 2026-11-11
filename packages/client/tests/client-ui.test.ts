@@ -49,6 +49,7 @@ describe('Client UI & Store Suite', () => {
       remoteCursors: {},
       lastAppliedSeq: 0,
       searchOpen: false,
+      loadModalOpen: false,
     });
   });
 
@@ -1392,6 +1393,17 @@ describe('Client UI & Store Suite', () => {
       // Center of 500+80=580, 300+80=380. Check pan shifted towards object
       expect(typeof updated.panX).toBe('number');
       expect(typeof updated.panY).toBe('number');
+    });
+
+    it('toggles load previous save dialog state', () => {
+      const store = useWhiteboardStore.getState();
+      expect(store.loadModalOpen).toBe(false);
+
+      store.setLoadModalOpen(true);
+      expect(useWhiteboardStore.getState().loadModalOpen).toBe(true);
+
+      store.setLoadModalOpen(false);
+      expect(useWhiteboardStore.getState().loadModalOpen).toBe(false);
     });
   });
 });

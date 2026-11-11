@@ -127,6 +127,7 @@ export interface WhiteboardState {
   versions: VersionMeta[];
   versionsOpen: boolean;
   searchOpen: boolean;
+  loadModalOpen: boolean;
   /** assetId -> data: URL of every image whose bytes have arrived. */
   imageData: Record<string, string>;
   remoteCursors: Record<string, RemoteCursor>;
@@ -202,6 +203,7 @@ export interface WhiteboardState {
   endStalePresentation: () => void;
   setVersionsOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
+  setLoadModalOpen: (open: boolean) => void;
   focusObject: (id: string) => void;
   requestVersions: () => void;
   saveVersion: (name: string) => void;
@@ -382,6 +384,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   versions: [],
   versionsOpen: false,
   searchOpen: false,
+  loadModalOpen: false,
   imageData: {},
   remoteCursors: {},
   lastAppliedSeq: 0,
@@ -989,6 +992,11 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   setSearchOpen: (open) => {
     set({ searchOpen: open });
+  },
+
+  setLoadModalOpen: (open) => {
+    set({ loadModalOpen: open });
+    if (open) get().requestVersions();
   },
 
   focusObject: (id: string) => {

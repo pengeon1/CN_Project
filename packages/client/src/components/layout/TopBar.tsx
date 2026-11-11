@@ -49,6 +49,7 @@ export const TopBar: React.FC = () => {
     setVersionsOpen,
     searchOpen,
     setSearchOpen,
+    setLoadModalOpen,
   } = useWhiteboardStore();
 
   const getInitials = (name: string): string => {
@@ -152,16 +153,8 @@ export const TopBar: React.FC = () => {
                   Save
                 </button>
                 <button
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        'Load the last saved board? Current unsaved changes will be replaced.',
-                      )
-                    ) {
-                      void requestLoadState();
-                    }
-                  }}
-                  title="Load the last saved room state"
+                  onClick={() => setLoadModalOpen(true)}
+                  title="Choose which saved board or version to load"
                   className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
                 >
                   <Upload className="h-4 w-4" />

@@ -20,6 +20,7 @@ import { AccessNoticeDialog } from './components/dialogs/AccessNoticeDialog.js';
 import { VersionHistoryDialog } from './components/dialogs/VersionHistoryDialog.js';
 import { ProfileSettingsDialog } from './components/dialogs/ProfileSettingsDialog.js';
 import { SearchDialog } from './components/dialogs/SearchDialog.js';
+import { LoadSaveDialog } from './components/dialogs/LoadSaveDialog.js';
 
 export const App: React.FC = () => {
   useKeyboardShortcuts();
@@ -96,6 +97,7 @@ export const App: React.FC = () => {
       <ProfileSettingsDialog />
       <VersionHistoryDialog />
       <SearchDialog />
+      <LoadSaveDialog />
     </div>
   );
 };

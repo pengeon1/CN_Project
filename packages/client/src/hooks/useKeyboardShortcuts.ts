@@ -8,7 +8,8 @@
  * - O: Ellipse tool
  * - T: Text tool
  * - S: Sticky Note tool
- * - L: Arrow / Line tool
+ * - L: Arrow tool
+ * - N: Line tool
  *
  * Prevents hotkey interception when focus is inside text inputs, textareas,
  * or content-editable elements, or when modifier keys (Ctrl, Meta, Alt) are held.
@@ -34,6 +35,8 @@ export const TOOL_SHORTCUTS: Record<string, CanvasTool> = {
   S: 'sticky_note',
   l: 'arrow',
   L: 'arrow',
+  n: 'line',
+  N: 'line',
 };
 
 /**

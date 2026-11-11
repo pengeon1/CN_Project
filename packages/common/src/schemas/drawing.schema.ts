@@ -82,10 +82,40 @@ export const ShapeAddPayloadSchema = z.object({
   object: ShapeObjectSchema,
 });
 
+const HexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a 6-digit hex color');
+const Coord = z.number().finite().min(-1_000_000).max(1_000_000);
+
+/**
+ * Whitelisted, range-checked property changes. `.strict()` rejects unknown keys so a client can
+ * never smuggle in `authorId`, `type`, `id` or `seq`.
+ */
+export const ObjectChangesSchema = z
+  .object({
+    zIndex: z.number().int().min(-1_000_000).max(1_000_000),
+    x: Coord,
+    y: Coord,
+    width: Coord,
+    height: Coord,
+    strokeColor: HexColor,
+    strokeWidth: z.number().min(0).max(100),
+    fillColor: HexColor.nullable(),
+    text: z.string().max(5000),
+    fontSize: z.number().min(8).max(144),
+    fontFamily: z.string().max(64),
+    align: z.enum(['left', 'center', 'right']),
+    bold: z.boolean(),
+    italic: z.boolean(),
+    color: HexColor,
+    points: z.array(PointSchema).min(1).max(5000),
+  })
+  .partial()
+  .strict()
+  .refine((c) => Object.keys(c).length > 0, 'changes must not be empty');
+
 export const ObjectUpdatePayloadSchema = z.object({
   op_id: z.string().uuid(),
   id: z.string().uuid(),
-  changes: z.record(z.unknown()),
+  changes: ObjectChangesSchema,
 });
 
 export const ObjectDeletePayloadSchema = z.object({

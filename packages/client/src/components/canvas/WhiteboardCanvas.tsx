@@ -14,13 +14,59 @@ import {
   type Point,
   type RemoteCursor,
   STROKE_BATCH_INTERVAL_MS,
+  type ShapeObject,
   type StrokeObject,
+  type WhiteboardObject,
 } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { isEditableElement } from '../../hooks/useKeyboardShortcuts.js';
+import {
+  type Bounds,
+  type HandleId,
+  fontOf,
+  getBounds,
+  hitTest,
+  isLinear,
+  lighten,
+  moveChanges,
+  pickHandle,
+  pickTopmost,
+  renderSelection,
+  renderShape,
+  resizeChanges,
+  stickyFill,
+  STICKY_TEXT_COLOR,
+} from './shapes.js';
+
+/** Default sizes (world units) for shapes created with a plain click instead of a drag. */
+const DEFAULT_SIZE = {
+  rectangle: { w: 140, h: 90 },
+  ellipse: { w: 140, h: 90 },
+  line: { w: 140, h: 0 },
+  arrow: { w: 140, h: 0 },
+  text: { w: 220, h: 40 },
+  sticky_note: { w: 180, h: 180 },
+} as const;
+
+type ShapeTool = keyof typeof DEFAULT_SIZE;
+const isShapeTool = (t: string): t is ShapeTool => t in DEFAULT_SIZE;
+
+/** Active pointer interaction on the select tool (kept in a ref; preview lives in state). */
+type DragState =
+  | { kind: 'move'; sx: number; sy: number; ids: string[]; moved: boolean }
+  | { kind: 'resize'; id: string; handle: HandleId }
+  | { kind: 'create'; sx: number; sy: number; tool: ShapeTool };
+
+/** Inline editor for text boxes, sticky notes and text inside shapes. */
+interface EditorState {
+  /** Existing object being edited, or null while composing a brand-new one. */
+  id: string | null;
+  base: ShapeObject;
+}
 
 interface HoveredAuthorInfo {
   strokeId: string;
+  isStroke: boolean;
   authorName: string;
   authorColor: string;
   screenX: number;
@@ -144,51 +190,6 @@ function renderRemoteCursor(
   ctx.restore();
 }
 
-/**
- * Computes square of distance from point (px, py) to line segment (vx, vy) -> (wx, wy).
- */
-function distToSegmentSquared(
-  px: number,
-  py: number,
-  vx: number,
-  vy: number,
-  wx: number,
-  wy: number,
-): number {
-  const l2 = (vx - wx) * (vx - wx) + (vy - wy) * (vy - wy);
-  if (l2 === 0) return (px - vx) * (px - vx) + (py - vy) * (py - vy);
-  let t = ((px - vx) * (wx - vx) + (py - vy) * (wy - vy)) / l2;
-  t = Math.max(0, Math.min(1, t));
-  const projX = vx + t * (wx - vx);
-  const projY = vy + t * (wy - vy);
-  return (px - projX) * (px - projX) + (py - projY) * (py - projY);
-}
-
-/**
- * Calculates shortest distance from a world point (px, py) to a stroke's path using segment tests.
- */
-function getDistanceToStroke(px: number, py: number, stroke: StrokeObject): number {
-  if (stroke.points.length === 0) return Infinity;
-  if (stroke.points.length === 1) {
-    const pt = stroke.points[0]!;
-    const dx = px - pt.x;
-    const dy = py - pt.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  let minDistanceSq = Infinity;
-  for (let i = 0; i < stroke.points.length - 1; i++) {
-    const p1 = stroke.points[i]!;
-    const p2 = stroke.points[i + 1]!;
-    const dSq = distToSegmentSquared(px, py, p1.x, p1.y, p2.x, p2.y);
-    if (dSq < minDistanceSq) {
-      minDistanceSq = dSq;
-    }
-  }
-
-  return Math.sqrt(minDistanceSq);
-}
-
 export const WhiteboardCanvas: React.FC = () => {
   const {
     zoom,
@@ -210,6 +211,13 @@ export const WhiteboardCanvas: React.FC = () => {
     finishDrawing,
     broadcastCursorPosition,
     eraseObjects,
+    selectedIds,
+    setSelectedIds,
+    setActiveTool,
+    addShape,
+    updateObjects,
+    deleteObjects,
+    toolProps,
   } = useWhiteboardStore();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -229,6 +237,15 @@ export const WhiteboardCanvas: React.FC = () => {
 
   // Pointer position for eraser reticle rendering
   const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Select/shape interaction state
+  const dragRef = useRef<DragState | null>(null);
+  /** Local-only geometry overrides while dragging; committed as OBJECT_UPDATE on pointer-up. */
+  const [preview, setPreview] = useState<Record<string, WhiteboardObject>>({});
+  const [draft, setDraft] = useState<ShapeObject | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [editorText, setEditorText] = useState('');
+  const editorClosedRef = useRef(false);
 
   // Author attribution tooltip state
   const [hoveredAuthor, setHoveredAuthor] = useState<HoveredAuthorInfo | null>(null);
@@ -279,11 +296,8 @@ export const WhiteboardCanvas: React.FC = () => {
       const threshold = ERASER_RADIUS;
 
       for (const obj of Object.values(objects)) {
-        if (obj.type === 'stroke') {
-          const dist = getDistanceToStroke(worldX, worldY, obj);
-          if (dist <= threshold + obj.width / 2) {
-            hitIds.push(obj.id);
-          }
+        if (hitTest(obj, worldX, worldY, threshold)) {
+          hitIds.push(obj.id);
         }
       }
 
@@ -364,14 +378,25 @@ export const WhiteboardCanvas: React.FC = () => {
     ctx.scale(zoom, zoom);
     ctx.translate(panX, panY);
 
-    // Sort committed strokes by zIndex
-    const strokeList = Object.values(objects)
-      .filter((obj): obj is StrokeObject => obj.type === 'stroke')
+    // Draw every committed object in z-order; drag previews override the stored geometry.
+    const drawList = Object.values(objects)
+      .map((o) => preview[o.id] ?? o)
       .sort((a, b) => a.zIndex - b.zIndex);
 
-    for (const stroke of strokeList) {
-      const isHovered = hoveredAuthor?.strokeId === stroke.id;
-      renderStroke(ctx, stroke, isHovered);
+    for (const obj of drawList) {
+      if (obj.type === 'stroke') {
+        renderStroke(ctx, obj, hoveredAuthor?.strokeId === obj.id);
+      } else {
+        renderShape(ctx, obj, editor?.id === obj.id);
+      }
+    }
+    if (draft) renderShape(ctx, draft);
+
+    const selected = selectedIds
+      .map((id) => (objects[id] ? (preview[id] ?? objects[id]) : null))
+      .filter((o): o is WhiteboardObject => o !== null);
+    for (const obj of selected) {
+      renderSelection(ctx, obj, zoom, selected.length === 1);
     }
 
     // Render active local in-progress stroke with 60 FPS optimistic smoothness
@@ -414,6 +439,10 @@ export const WhiteboardCanvas: React.FC = () => {
     hoveredAuthor?.strokeId,
     activeTool,
     eraserPos,
+    preview,
+    draft,
+    editor,
+    selectedIds,
   ]);
 
   // Continuously request animation frame when rendering changes
@@ -434,6 +463,139 @@ export const WhiteboardCanvas: React.FC = () => {
     observer.observe(container);
     return () => observer.disconnect();
   }, [renderCanvas]);
+
+  /** Builds a not-yet-sent shape from the active tool properties. */
+  const buildShape = (tool: ShapeTool, x: number, y: number, w: number, h: number): ShapeObject => {
+    const linear = tool === 'line' || tool === 'arrow';
+    const box = !linear;
+    return {
+      id: 'draft',
+      type: 'shape',
+      authorId: currentUser?.id ?? 'local',
+      seq: 0,
+      zIndex: 0,
+      updatedAt: Date.now(),
+      shapeType: tool,
+      x: box ? Math.min(x, x + w) : x,
+      y: box ? Math.min(y, y + h) : y,
+      width: box ? Math.abs(w) : w,
+      height: box ? Math.abs(h) : h,
+      strokeColor: toolProps.color,
+      strokeWidth: tool === 'text' || tool === 'sticky_note' ? 0 : toolProps.width,
+      fillColor:
+        tool === 'sticky_note'
+          ? stickyFill(toolProps.color)
+          : toolProps.fill && (tool === 'rectangle' || tool === 'ellipse')
+            ? lighten(toolProps.color, 0.75)
+            : undefined,
+      fontSize: toolProps.fontSize,
+      fontFamily: toolProps.fontFamily,
+      bold: toolProps.bold,
+      italic: toolProps.italic,
+      align: toolProps.align,
+    };
+  };
+
+  /** Returns `o` with geometry changes applied locally (no seq bump; preview only). */
+  const applyPreview = (
+    o: WhiteboardObject,
+    c: ReturnType<typeof moveChanges>,
+  ): WhiteboardObject => {
+    if (o.type === 'stroke') return c.points ? { ...o, points: c.points } : o;
+    return { ...o, ...c, fillColor: o.fillColor } as ShapeObject;
+  };
+
+  /** Finishes a create-drag: text/sticky open the editor, other shapes are sent immediately. */
+  const finishCreate = (drag: Extract<DragState, { kind: 'create' }>, x: number, y: number) => {
+    setDraft(null);
+    const dx = x - drag.sx;
+    const dy = y - drag.sy;
+    const tiny = Math.hypot(dx, dy) * zoom < 6;
+    const def = DEFAULT_SIZE[drag.tool];
+    const shape = tiny
+      ? buildShape(drag.tool, drag.sx, drag.sy, def.w, def.h)
+      : buildShape(drag.tool, drag.sx, drag.sy, dx, dy);
+
+    if (drag.tool === 'text' || drag.tool === 'sticky_note') {
+      editorClosedRef.current = false;
+      setEditorText('');
+      setEditor({
+        id: null,
+        base:
+          tiny || drag.tool === 'sticky_note'
+            ? shape
+            : { ...shape, height: Math.max(shape.height, 40) },
+      });
+      return;
+    }
+    const id = addShape(shape);
+    if (id) setSelectedIds([id]);
+    setActiveTool('select');
+  };
+
+  /** Opens the inline editor on an existing text-capable object. */
+  const beginEdit = (obj: WhiteboardObject) => {
+    if (obj.type !== 'shape' || isLinear(obj)) return;
+    editorClosedRef.current = false;
+    setEditorText(obj.text ?? '');
+    setEditor({ id: obj.id, base: obj });
+  };
+
+  /** Commits (or discards) the inline editor; guarded so blur + Enter cannot double-fire. */
+  const closeEditor = (commit: boolean) => {
+    if (!editor || editorClosedRef.current) return;
+    editorClosedRef.current = true;
+    const text = editorText;
+    const base = editor.base;
+    setEditor(null);
+    if (!commit) return;
+
+    // Text boxes grow with their content; sticky notes and shapes keep their size.
+    const lines = text.split('\n').length;
+    const grownHeight =
+      base.shapeType === 'text'
+        ? Math.max(40, Math.ceil(lines * (base.fontSize ?? 16) * 1.3 + 12))
+        : base.height;
+
+    if (editor.id) {
+      if (text === (base.text ?? '')) return;
+      updateObjects([editor.id], () => ({
+        text,
+        ...(base.shapeType === 'text' ? { height: grownHeight } : {}),
+      }));
+    } else if (text.trim() !== '') {
+      const id = addShape({ ...base, text, height: grownHeight });
+      if (id) setSelectedIds([id]);
+      setActiveTool('select');
+    }
+  };
+
+  // Delete / Escape on the canvas (ignored while typing in any input or the inline editor)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableElement(e.target)) return;
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
+        deleteObjects(selectedIds);
+        e.preventDefault();
+      } else if (e.key === 'Escape' && selectedIds.length > 0) {
+        setSelectedIds([]);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedIds, deleteObjects, setSelectedIds]);
+
+  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (activeTool !== 'select') return;
+    const { x, y } = screenToWorld(e.clientX, e.clientY);
+    const hit = pickTopmost(objects, x, y, 8 / zoom);
+    if (hit) {
+      setSelectedIds([hit.id]);
+      beginEdit(hit);
+    }
+  };
+
+  const editorBounds: Bounds | null = editor ? getBounds(editor.base) : null;
 
   // Pointer event handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -461,7 +623,48 @@ export const WhiteboardCanvas: React.FC = () => {
       return;
     }
 
-    // Eraser tool deletes strokes on click / drag
+    // Shape / text / sticky tools: drag to size, or click for a default size
+    if (e.button === 0 && isShapeTool(activeTool)) {
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      dragRef.current = { kind: 'create', sx: x, sy: y, tool: activeTool };
+      setDraft(buildShape(activeTool, x, y, 0, 0));
+      containerRef.current?.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+
+    // Select tool: resize handle, then body hit (move), else clear selection
+    if (e.button === 0 && activeTool === 'select') {
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      const sole = selectedIds.length === 1 ? objects[selectedIds[0]!] : undefined;
+      const handle = sole ? pickHandle(sole, x, y, zoom) : null;
+      if (sole && handle) {
+        dragRef.current = { kind: 'resize', id: sole.id, handle };
+        containerRef.current?.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+      const hit = pickTopmost(objects, x, y, 8 / zoom);
+      if (hit) {
+        let ids = selectedIds;
+        if (e.shiftKey) {
+          ids = ids.includes(hit.id) ? ids.filter((i) => i !== hit.id) : [...ids, hit.id];
+        } else if (!ids.includes(hit.id)) {
+          ids = [hit.id];
+        }
+        setSelectedIds(ids);
+        if (ids.includes(hit.id)) {
+          dragRef.current = { kind: 'move', sx: x, sy: y, ids, moved: false };
+          containerRef.current?.setPointerCapture(e.pointerId);
+        }
+      } else {
+        setSelectedIds([]);
+      }
+      e.preventDefault();
+      return;
+    }
+
+    // Eraser tool deletes objects on click / drag
     if (e.button === 0 && activeTool === 'eraser') {
       const { x, y } = screenToWorld(e.clientX, e.clientY);
       isErasingRef.current = true;
@@ -483,6 +686,30 @@ export const WhiteboardCanvas: React.FC = () => {
       adjustPan(dx, dy);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       return;
+    }
+
+    // Select/shape drags: update local previews only; the network op is sent on release
+    const drag = dragRef.current;
+    if (drag) {
+      if (drag.kind === 'create') {
+        setDraft(buildShape(drag.tool, drag.sx, drag.sy, x - drag.sx, y - drag.sy));
+      } else if (drag.kind === 'move') {
+        const dx = x - drag.sx;
+        const dy = y - drag.sy;
+        if (!drag.moved && Math.hypot(dx, dy) * zoom < 3) return;
+        drag.moved = true;
+        const next: Record<string, WhiteboardObject> = {};
+        for (const id of drag.ids) {
+          const o = objects[id];
+          if (o) next[id] = applyPreview(o, moveChanges(o, dx, dy));
+        }
+        setPreview(next);
+      } else {
+        const o = objects[drag.id];
+        if (o && o.type === 'shape') {
+          setPreview({ [o.id]: applyPreview(o, resizeChanges(o, drag.handle, x, y)) });
+        }
+      }
     }
 
     // Track eraser reticle position in screen coordinates
@@ -527,26 +754,15 @@ export const WhiteboardCanvas: React.FC = () => {
     }
 
     // Select Tool: hit test for author hover attribution
-    if (activeTool === 'select' && !isPanning && !isDrawingRef.current) {
-      let closestStroke: StrokeObject | null = null;
-      let minDistance = 12; // tolerance in canvas world units
-
-      for (const obj of Object.values(objects)) {
-        if (obj.type === 'stroke') {
-          const dist = getDistanceToStroke(x, y, obj);
-          if (dist < minDistance) {
-            minDistance = dist;
-            closestStroke = obj;
-          }
-        }
-      }
+    if (activeTool === 'select' && !isPanning && !isDrawingRef.current && !dragRef.current) {
+      const closestStroke = pickTopmost(objects, x, y, 8 / zoom);
 
       if (closestStroke) {
         const author =
           participants.find((p) => p.id === closestStroke!.authorId) ||
           (closestStroke.authorId === currentUser?.id
             ? { username: currentUser.username, color: currentUser.color }
-            : { username: 'Author', color: closestStroke.color });
+            : { username: 'Author', color: '#64748B' });
 
         const container = containerRef.current;
         const rect = container?.getBoundingClientRect();
@@ -555,6 +771,7 @@ export const WhiteboardCanvas: React.FC = () => {
 
         setHoveredAuthor({
           strokeId: closestStroke.id,
+          isStroke: closestStroke.type === 'stroke',
           authorName: author.username,
           authorColor: author.color,
           screenX,
@@ -571,6 +788,33 @@ export const WhiteboardCanvas: React.FC = () => {
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isPanning) {
       setIsPanning(false);
+    }
+
+    const drag = dragRef.current;
+    if (drag) {
+      dragRef.current = null;
+      try {
+        containerRef.current?.releasePointerCapture(e.pointerId);
+      } catch {
+        // Pointer capture may have already been released
+      }
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      if (drag.kind === 'create') {
+        finishCreate(drag, x, y);
+      } else if (drag.kind === 'move') {
+        if (drag.moved) {
+          const dx = x - drag.sx;
+          const dy = y - drag.sy;
+          updateObjects(drag.ids, (o) => moveChanges(o, dx, dy));
+        }
+      } else {
+        const o = objects[drag.id];
+        if (o && o.type === 'shape') {
+          updateObjects([o.id], () => resizeChanges(o, drag.handle, x, y));
+        }
+      }
+      setPreview({});
+      return;
     }
 
     if (isErasingRef.current) {
@@ -644,6 +888,7 @@ export const WhiteboardCanvas: React.FC = () => {
       onPointerLeave={handlePointerLeave}
       onPointerCancel={handlePointerCancel}
       onWheel={handleWheel}
+      onDoubleClick={handleDoubleClick}
       className={`relative h-full w-full overflow-hidden touch-none ${
         isPanning
           ? 'cursor-grab active:cursor-grabbing'
@@ -662,6 +907,33 @@ export const WhiteboardCanvas: React.FC = () => {
         style={{ imageRendering: 'auto' }}
       />
 
+      {/* Inline text editor (text boxes, sticky notes, text inside shapes) */}
+      {editor && editorBounds && (
+        <textarea
+          autoFocus
+          value={editorText}
+          onChange={(e) => setEditorText(e.target.value)}
+          onBlur={() => closeEditor(true)}
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') closeEditor(false);
+            else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) closeEditor(true);
+          }}
+          className="absolute z-30 resize-none overflow-hidden rounded border-2 border-blue-500 bg-transparent p-1 outline-none"
+          style={{
+            left: (editorBounds.x + panX) * zoom,
+            top: (editorBounds.y + panY) * zoom,
+            width: Math.max(editorBounds.w * zoom, 60),
+            height: Math.max(editorBounds.h * zoom, 30),
+            font: fontOf({ ...editor.base, fontSize: (editor.base.fontSize ?? 16) * zoom }),
+            textAlign: editor.base.align ?? 'left',
+            color:
+              editor.base.shapeType === 'sticky_note' ? STICKY_TEXT_COLOR : editor.base.strokeColor,
+            background: editor.base.shapeType === 'sticky_note' ? editor.base.fillColor : undefined,
+          }}
+        />
+      )}
+
       {/* Author Attribution Hover Tooltip (Active when using Select tool) */}
       {hoveredAuthor && (
         <div
@@ -675,7 +947,9 @@ export const WhiteboardCanvas: React.FC = () => {
             className="h-2.5 w-2.5 rounded-full"
             style={{ backgroundColor: hoveredAuthor.authorColor }}
           />
-          <span>Drawn by {hoveredAuthor.authorName}</span>
+          <span>
+            {hoveredAuthor.isStroke ? 'Drawn' : 'Created'} by {hoveredAuthor.authorName}
+          </span>
         </div>
       )}
 

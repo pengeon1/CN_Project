@@ -545,9 +545,18 @@ Updates attributes (position, size, color, content) of an existing object.
 }
 ```
 
+**Phase 12 rules for shape operations**
+
+- _Server-owned fields._ On `SHAPE_ADD` the server overwrites `authorId` (the sender), `zIndex` (top of the stack) and `seq`, and broadcasts the normalized object, so a client can neither forge authorship nor jump the layer order. Reusing an existing object `id` is rejected.
+- _Whitelisted changes._ `changes` may only contain `zIndex, x, y, width, height, strokeColor, strokeWidth, fillColor (null removes it), text, fontSize, fontFamily, align, bold, italic` for shapes and `zIndex, color, strokeWidth (stroke width), points` for freehand strokes. Unknown keys, bad colors, non-finite or out-of-range numbers and empty change sets are rejected by the zod schema.
+- _Conflict resolution: last-writer-wins per property, ordered by `seq`._ The room applies operations one at a time, so arrival order is `seq` order, and every client replays in `seq` order. Edits to different properties of one object merge; edits to the same property resolve to the higher `seq`. Every change is an absolute value (moving a stroke sends the full `points` array), so re-applying an echoed operation is idempotent.
+- _Updating a deleted object_ is rejected with an `ACK` of status `rejected`; the client's optimistic copy is overwritten by the authoritative `OBJECT_DELETE` it already received.
+- _Undo._ Undoing `SHAPE_ADD` removes the object; undoing `OBJECT_UPDATE` restores the pre-update object; undoing `OBJECT_DELETE` restores it. Redo reverses each. Undo restores the whole previous object, so if another user edited the same object after your change, your undo also reverts their edit (documented limitation).
+- Drags (move/resize) show a local preview and send **one** `OBJECT_UPDATE` on release, so one drag is one undo step.
+
 #### `OBJECT_DELETE` / `ERASE` (Client -> Server -> Broadcast)
 
-Removes canvas objects by ID.
+`OBJECT_DELETE` removes one object (`{ "op_id", "id" }`, used by Delete key / selection delete); `ERASE` removes several by ID (eraser tool). Both are undoable.
 
 ```json
 {

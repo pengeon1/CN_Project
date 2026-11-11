@@ -6,13 +6,17 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Check, Copy, Network, Share2, Users, X } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff, KeyRound, Network, Share2, Users, X } from 'lucide-react';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
 export const ShareDialog: React.FC = () => {
-  const { shareModalOpen, setShareModalOpen, roomInfo, serverInfo } = useWhiteboardStore();
+  const { shareModalOpen, setShareModalOpen, roomInfo, roomPassword, serverInfo } =
+    useWhiteboardStore();
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedPassword, setCopiedPassword] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [includePassword, setIncludePassword] = useState(true);
   const [lanIps, setLanIps] = useState<string[]>([]);
   const [activeIp, setActiveIp] = useState<string>(serverInfo.host);
 
@@ -64,9 +68,24 @@ export const ShareDialog: React.FC = () => {
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
+  const handleCopyPassword = async () => {
+    if (!roomPassword) return;
+    await navigator.clipboard.writeText(roomPassword);
+    setCopiedPassword(true);
+    setTimeout(() => setCopiedPassword(false), 2000);
+  };
+
   const handleCopyAll = async () => {
-    const summary = `Join my LAN Whiteboard session!\nServer IP: ${activeIp}\nPort: ${serverInfo.port}\nRoom Code: ${roomInfo.code}`;
-    await navigator.clipboard.writeText(summary);
+    const lines = [
+      'Join my LAN Whiteboard session!',
+      `Server IP: ${activeIp}`,
+      `Port: ${serverInfo.port}`,
+      `Room Code: ${roomInfo.code}`,
+    ];
+    if (includePassword && roomPassword) {
+      lines.push(`Password: ${roomPassword}`);
+    }
+    await navigator.clipboard.writeText(lines.join('\n'));
     setCopiedAll(true);
     setTimeout(() => setCopiedAll(false), 2000);
   };
@@ -111,7 +130,7 @@ export const ShareDialog: React.FC = () => {
             </div>
           </div>
 
-          {/* Network details */}
+          {/* Network & Access details */}
           <div className="space-y-2.5 rounded-xl bg-slate-950/60 p-3.5 border border-slate-800 text-xs text-slate-300">
             <div className="flex items-center justify-between">
               <span className="text-slate-400 flex items-center gap-1.5">
@@ -147,7 +166,55 @@ export const ShareDialog: React.FC = () => {
                 {roomInfo.name}
               </span>
             </div>
+            <div className="flex items-center justify-between pt-1 border-t border-slate-800/70">
+              <span className="text-slate-400 flex items-center gap-1.5">
+                <KeyRound className="h-3.5 w-3.5 text-amber-400" /> Password:
+              </span>
+              {roomPassword ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono font-medium text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 max-w-[120px] truncate">
+                    {showPassword
+                      ? roomPassword
+                      : '•'.repeat(Math.min(12, Math.max(6, roomPassword.length)))}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+                  >
+                    {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyPassword}
+                    title="Copy password"
+                    className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+                  >
+                    {copiedPassword ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <span className="text-slate-500 italic">None (Public)</span>
+              )}
+            </div>
           </div>
+
+          {roomPassword && (
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none px-1">
+              <input
+                type="checkbox"
+                checked={includePassword}
+                onChange={(e) => setIncludePassword(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-0"
+              />
+              <span>Include password when sharing invitation</span>
+            </label>
+          )}
 
           <button
             onClick={handleCopyAll}

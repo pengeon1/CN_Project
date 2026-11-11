@@ -105,6 +105,7 @@ export interface WhiteboardState {
   connectionStatus: ConnectionStatus;
   connectionError: string | null;
   serverInfo: { host: string; port: number };
+  roomPassword?: string;
   roomInfo: {
     code: string;
     name: string;
@@ -112,6 +113,7 @@ export interface WhiteboardState {
     locked: boolean;
     allowNameChanges?: boolean;
     createdAt?: number;
+    password?: string;
   } | null;
   persistenceStatus: string | null;
   accessNotice: AccessNotice | null;
@@ -376,6 +378,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   connectionStatus: 'disconnected',
   connectionError: null,
   serverInfo: { host: '127.0.0.1', port: 4000 },
+  roomPassword: undefined,
   roomInfo: null,
   persistenceStatus: null,
   accessNotice: null,
@@ -697,6 +700,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   connectToServer: async (options) => {
     set({
       serverInfo: { host: options.host, port: options.port },
+      roomPassword: options.password?.trim() || undefined,
       connectionStatus: 'connecting',
       connectionError: null,
       accessNotice: null,
@@ -733,6 +737,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           locked: false,
           allowNameChanges: options.action === 'create' && options.allowNameChanges === true,
           createdAt: Date.now(),
+          password: options.password?.trim() || undefined,
         },
         currentUser: mockUser,
         participants: [
@@ -757,6 +762,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     }
     set({
       connectionStatus: 'disconnected',
+      roomPassword: undefined,
       roomInfo: null,
       persistenceStatus: null,
       currentUser: null,
@@ -1388,6 +1394,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             locked: payload.locked,
             allowNameChanges: payload.allowNameChanges ?? false,
             createdAt: payload.createdAt,
+            password: get().roomPassword,
           },
           currentUser: myParticipant
             ? {
@@ -1660,6 +1667,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
                 : 'The host removed you from this room.',
             },
             connectionStatus: 'disconnected',
+            roomPassword: undefined,
             roomInfo: null,
             persistenceStatus: null,
             currentUser: null,

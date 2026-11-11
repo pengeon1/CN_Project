@@ -3,17 +3,22 @@
  * Houses tool selectors: select, pen, eraser, shapes, text, sticky note, line/arrow, image.
  */
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   Circle,
   Crosshair,
   Eraser,
+  FolderOpen,
+  History,
   Image as ImageIcon,
-  MoreHorizontal,
+  Keyboard,
+  Maximize2,
   Minus,
+  MoreHorizontal,
   MousePointer2,
   Pencil,
+  Search,
   Square,
   StickyNote,
   Trash2,
@@ -44,9 +49,32 @@ const PRIMARY_TOOLS: ToolItem[] = [
 ];
 
 export const LeftToolbar: React.FC = () => {
-  const { activeTool, setActiveTool, currentUser, roomInfo, setClearModalOpen } =
-    useWhiteboardStore();
+  const {
+    activeTool,
+    setActiveTool,
+    currentUser,
+    roomInfo,
+    setClearModalOpen,
+    resetView,
+    setSearchOpen,
+    setLoadModalOpen,
+    setVersionsOpen,
+  } = useWhiteboardStore();
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close more menu on click outside
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [moreMenuOpen]);
   const canEdit =
     !currentUser ||
     (canMutateCanvas(currentUser.role) && (!roomInfo?.locked || isHost(currentUser.role)));
@@ -118,12 +146,101 @@ export const LeftToolbar: React.FC = () => {
       </button>
 
       {/* More / Overflow Menu */}
-      <button
-        title="More Tools"
-        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setMoreMenuOpen(!moreMenuOpen)}
+          title="More Tools & Utilities"
+          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+            moreMenuOpen
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
+              : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+          }`}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+
+        {moreMenuOpen && (
+          <div className="absolute left-10 bottom-0 z-50 w-56 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl text-slate-200 text-xs">
+            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-800 mb-1">
+              Utilities &amp; Tools
+            </div>
+
+            <button
+              onClick={() => {
+                resetView();
+                setMoreMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+            >
+              <Maximize2 className="h-4 w-4 text-blue-400" />
+              <span>Reset View (100%)</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setSearchOpen(true);
+                setMoreMenuOpen(false);
+              }}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+            >
+              <div className="flex items-center gap-2">
+                <Search className="h-4 w-4 text-cyan-400" />
+                <span>Find on Board</span>
+              </div>
+              <kbd className="rounded border border-slate-700 px-1 text-[10px] text-slate-500 font-mono">
+                Ctrl+F
+              </kbd>
+            </button>
+
+            <button
+              onClick={() => {
+                setLoadModalOpen(true);
+                setMoreMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+            >
+              <FolderOpen className="h-4 w-4 text-amber-400" />
+              <span>Load Previous Save</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setVersionsOpen(true);
+                setMoreMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+            >
+              <History className="h-4 w-4 text-purple-400" />
+              <span>Version History</span>
+            </button>
+
+            <div className="my-1 h-[1px] bg-slate-800" />
+
+            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+              <Keyboard className="h-3 w-3 text-slate-400" />
+              <span>Key Shortcuts</span>
+            </div>
+            <div className="px-2.5 py-1 text-[11px] text-slate-400 space-y-0.5">
+              <div className="flex justify-between">
+                <span>Pen / Eraser</span>
+                <span className="font-mono text-slate-300">P / E</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Select / Pan</span>
+                <span className="font-mono text-slate-300">V / Space</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Shapes / Text</span>
+                <span className="font-mono text-slate-300">R, O, T, S</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Connector / Line</span>
+                <span className="font-mono text-slate-300">X, L, N</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="my-0.5 h-[1px] w-5 bg-slate-800" />
 

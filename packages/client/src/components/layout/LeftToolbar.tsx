@@ -81,7 +81,10 @@ export const LeftToolbar: React.FC = () => {
     (canMutateCanvas(currentUser.role) && (!roomInfo?.locked || isHost(currentUser.role)));
 
   return (
-    <aside className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl select-none">
+    <aside
+      onPointerDown={(e) => e.stopPropagation()}
+      className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl select-none"
+    >
       {PRIMARY_TOOLS.map((tool) => {
         const Icon = tool.icon;
         // The laser is ephemeral presence, so even read-only viewers may point.

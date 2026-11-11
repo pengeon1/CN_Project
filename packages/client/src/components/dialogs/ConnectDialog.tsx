@@ -55,6 +55,13 @@ export const ConnectDialog: React.FC = () => {
     }
   };
 
+  // Automatically scan for LAN servers when switching to or opening the Join tab
+  useEffect(() => {
+    if (tab === 'join' && window.electronAPI?.discoverServers && servers === null && !scanning) {
+      void scanLan();
+    }
+  }, [tab, scanning, servers]);
+
   if (!connectModalOpen) {
     return null;
   }

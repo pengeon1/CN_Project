@@ -695,7 +695,12 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   },
 
   connectToServer: async (options) => {
-    set({ connectionStatus: 'connecting', connectionError: null, accessNotice: null });
+    set({
+      serverInfo: { host: options.host, port: options.port },
+      connectionStatus: 'connecting',
+      connectionError: null,
+      accessNotice: null,
+    });
 
     const api = getElectronAPI();
     if (api) {

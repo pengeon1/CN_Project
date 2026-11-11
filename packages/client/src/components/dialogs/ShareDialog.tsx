@@ -1,9 +1,11 @@
 /**
  * @fileoverview Share session dialog.
  * Displays Server LAN IP, Port, Room Code, and copy shortcuts.
+ * Automatically resolves the machine's actual LAN IP address instead of
+ * loopback (127.0.0.1/localhost) so other devices on the LAN can connect.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, Copy, Network, Share2, Users, X } from 'lucide-react';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
@@ -11,6 +13,46 @@ export const ShareDialog: React.FC = () => {
   const { shareModalOpen, setShareModalOpen, roomInfo, serverInfo } = useWhiteboardStore();
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
+  const [lanIps, setLanIps] = useState<string[]>([]);
+  const [activeIp, setActiveIp] = useState<string>(serverInfo.host);
+
+  // Query actual network interfaces from Electron main process
+  useEffect(() => {
+    let isSubscribed = true;
+    const loadLanIps = async () => {
+      try {
+        if (window.electronAPI?.getLanAddresses) {
+          const addresses = await window.electronAPI.getLanAddresses();
+          if (isSubscribed && Array.isArray(addresses) && addresses.length > 0) {
+            setLanIps(addresses);
+            // If current serverInfo is loopback, prefer the machine's first LAN IP address
+            const isLoopback =
+              serverInfo.host === '127.0.0.1' ||
+              serverInfo.host === 'localhost' ||
+              serverInfo.host === '0.0.0.0';
+            if (isLoopback) {
+              setActiveIp(addresses[0]);
+            } else {
+              setActiveIp(serverInfo.host);
+            }
+            return;
+          }
+        }
+      } catch {
+        // Fallback to serverInfo.host
+      }
+      if (isSubscribed) {
+        setActiveIp(serverInfo.host);
+      }
+    };
+
+    if (shareModalOpen) {
+      loadLanIps();
+    }
+    return () => {
+      isSubscribed = false;
+    };
+  }, [shareModalOpen, serverInfo.host]);
 
   if (!shareModalOpen || !roomInfo) {
     return null;
@@ -23,7 +65,7 @@ export const ShareDialog: React.FC = () => {
   };
 
   const handleCopyAll = async () => {
-    const summary = `Join my LAN Whiteboard session!\nServer IP: ${serverInfo.host}\nPort: ${serverInfo.port}\nRoom Code: ${roomInfo.code}`;
+    const summary = `Join my LAN Whiteboard session!\nServer IP: ${activeIp}\nPort: ${serverInfo.port}\nRoom Code: ${roomInfo.code}`;
     await navigator.clipboard.writeText(summary);
     setCopiedAll(true);
     setTimeout(() => setCopiedAll(false), 2000);
@@ -70,12 +112,28 @@ export const ShareDialog: React.FC = () => {
           </div>
 
           {/* Network details */}
-          <div className="space-y-2 rounded-xl bg-slate-950/60 p-3.5 border border-slate-800 text-xs text-slate-300">
+          <div className="space-y-2.5 rounded-xl bg-slate-950/60 p-3.5 border border-slate-800 text-xs text-slate-300">
             <div className="flex items-center justify-between">
               <span className="text-slate-400 flex items-center gap-1.5">
-                <Network className="h-3.5 w-3.5 text-blue-400" /> Server IP:
+                <Network className="h-3.5 w-3.5 text-blue-400" /> LAN Server IP:
               </span>
-              <span className="font-mono font-medium text-slate-100">{serverInfo.host}</span>
+              {lanIps.length > 1 ? (
+                <select
+                  value={activeIp}
+                  onChange={(e) => setActiveIp(e.target.value)}
+                  className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                >
+                  {lanIps.map((ip) => (
+                    <option key={ip} value={ip}>
+                      {ip}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  {activeIp}
+                </span>
+              )}
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-400">TCP Port:</span>

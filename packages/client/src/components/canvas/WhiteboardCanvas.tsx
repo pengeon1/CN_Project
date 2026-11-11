@@ -6,7 +6,7 @@
  * and author hover attribution.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Minus, Plus, Radio, RotateCcw } from 'lucide-react';
 import { getStroke } from 'perfect-freehand';
 import {
@@ -31,22 +31,25 @@ import {
   type AnchorPoint,
   type Bounds,
   type HandleId,
+  defaultShapeAlign,
   findNearestAnchor,
   fontOf,
   getBounds,
   getObjectAnchors,
   hitTest,
+  isCenteredShape,
   isLinear,
   lighten,
   moveChanges,
   pickHandle,
+  pickTextTarget,
   pickTopmost,
   recomputeBoundConnector,
   renderSelection,
   renderShape,
   resizeChanges,
+  shapeTextColor,
   stickyFill,
-  STICKY_TEXT_COLOR,
 } from './shapes.js';
 
 /** Default sizes (world units) for shapes created with a plain click instead of a drag. */
@@ -341,6 +344,11 @@ export const WhiteboardCanvas: React.FC = () => {
     updateObjects,
     deleteObjects,
     toolProps,
+    activeTextEditor,
+    textEditRequestId,
+    textEditCommitCount,
+    setActiveTextEditor,
+    requestTextEdit,
   } = useWhiteboardStore();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -774,13 +782,13 @@ export const WhiteboardCanvas: React.FC = () => {
         tool === 'sticky_note'
           ? stickyFill(toolProps.color)
           : toolProps.fill && (tool === 'rectangle' || tool === 'ellipse')
-            ? lighten(toolProps.color, 0.75)
+            ? (toolProps.fillColor ?? lighten(toolProps.color, 0.75))
             : undefined,
       fontSize: toolProps.fontSize,
       fontFamily: toolProps.fontFamily,
       bold: toolProps.bold,
       italic: toolProps.italic,
-      align: toolProps.align,
+      align: isCenteredShape(tool) ? (toolProps.shapeAlign ?? 'center') : toolProps.align,
       ...(startAnchor ? { startAnchor } : {}),
       ...(endAnchor ? { endAnchor } : {}),
     };
@@ -882,24 +890,36 @@ export const WhiteboardCanvas: React.FC = () => {
     if (drag.tool === 'sticky_note') {
       const id = addShape({ ...shape, text: '' });
       if (id) {
+        const created = { ...shape, id, text: '' };
         setSelectedIds([id]);
         editorClosedRef.current = false;
         setEditorText('');
         setEditor({
           id,
-          base: { ...shape, id, text: '' },
+          base: created,
         });
+        syncActiveEditorStore(id, created);
       }
       return;
     }
 
     if (drag.tool === 'text') {
+      if (tiny) {
+        const hitShape = pickTextTarget(objects, drag.sx, drag.sy, 8 / zoom);
+        if (hitShape) {
+          setSelectedIds([hitShape.id]);
+          beginEdit(hitShape);
+          return;
+        }
+      }
+      const nextBase = tiny ? shape : { ...shape, height: Math.max(shape.height, 40) };
       editorClosedRef.current = false;
       setEditorText('');
       setEditor({
         id: null,
-        base: tiny ? shape : { ...shape, height: Math.max(shape.height, 40) },
+        base: nextBase,
       });
+      syncActiveEditorStore(null, nextBase);
       return;
     }
     const id = addShape(shape);
@@ -907,12 +927,42 @@ export const WhiteboardCanvas: React.FC = () => {
     setActiveTool('select');
   };
 
+  const syncActiveEditorStore = useCallback(
+    (objectId: string | null, base: ShapeObject) => {
+      if (
+        base.shapeType !== 'rectangle' &&
+        base.shapeType !== 'ellipse' &&
+        base.shapeType !== 'sticky_note' &&
+        base.shapeType !== 'text'
+      ) {
+        return;
+      }
+      setActiveTextEditor({
+        objectId,
+        shapeType: base.shapeType,
+        strokeColor: base.strokeColor,
+        fillColor: base.fillColor,
+        fontSize: base.fontSize ?? 16,
+        fontFamily: base.fontFamily ?? 'Inter, sans-serif',
+        bold: Boolean(base.bold),
+        italic: Boolean(base.italic),
+        align: base.align ?? defaultShapeAlign(base.shapeType),
+      });
+    },
+    [setActiveTextEditor],
+  );
+
   /** Opens the inline editor on an existing text-capable object. */
   const beginEdit = (obj: WhiteboardObject) => {
     if (obj.type !== 'shape' || isLinear(obj)) return;
+    const base: ShapeObject =
+      isCenteredShape(obj.shapeType) && !obj.text && obj.align === undefined
+        ? { ...obj, align: 'center' }
+        : obj;
     editorClosedRef.current = false;
-    setEditorText(obj.text ?? '');
-    setEditor({ id: obj.id, base: obj });
+    setEditorText(base.text ?? '');
+    setEditor({ id: base.id, base });
+    syncActiveEditorStore(base.id, base);
   };
 
   /** Commits (or discards) the inline editor; guarded so blur + Enter cannot double-fire. */
@@ -920,8 +970,21 @@ export const WhiteboardCanvas: React.FC = () => {
     if (!editor || editorClosedRef.current) return;
     editorClosedRef.current = true;
     const text = editorText;
-    const base = editor.base;
+    const live = useWhiteboardStore.getState().activeTextEditor;
+    const base: ShapeObject = live
+      ? {
+          ...editor.base,
+          strokeColor: live.strokeColor,
+          fillColor: live.fillColor,
+          fontSize: live.fontSize,
+          fontFamily: live.fontFamily,
+          bold: live.bold,
+          italic: live.italic,
+          align: live.align,
+        }
+      : editor.base;
     setEditor(null);
+    setActiveTextEditor(null);
     if (!commit) return;
 
     // Text boxes grow with their content; sticky notes and shapes keep their size.
@@ -932,9 +995,11 @@ export const WhiteboardCanvas: React.FC = () => {
         : base.height;
 
     if (editor.id) {
-      if (text === (base.text ?? '')) return;
+      const needsCenteredAlignPersist = editor.base.align !== base.align && text.trim() !== '';
+      if (text === (editor.base.text ?? '') && !needsCenteredAlignPersist) return;
       updateObjects([editor.id], () => ({
         text,
+        ...(needsCenteredAlignPersist ? { align: base.align } : {}),
         ...(base.shapeType === 'text' ? { height: grownHeight } : {}),
       }));
     } else if (text.trim() !== '') {
@@ -943,6 +1008,31 @@ export const WhiteboardCanvas: React.FC = () => {
       setActiveTool('select');
     }
   };
+
+  const beginEditRef = useRef(beginEdit);
+  beginEditRef.current = beginEdit;
+  const closeEditorRef = useRef(() => closeEditor(true));
+  closeEditorRef.current = () => closeEditor(true);
+
+  useEffect(() => {
+    if (!textEditRequestId) return;
+    requestTextEdit(null);
+    const target = objects[textEditRequestId];
+    if (target && target.type === 'shape' && !isLinear(target)) {
+      setSelectedIds([target.id]);
+      beginEditRef.current(target);
+    }
+  }, [textEditRequestId, objects, requestTextEdit, setSelectedIds]);
+
+  const lastCommitCountRef = useRef(textEditCommitCount);
+  useEffect(() => {
+    if (textEditCommitCount !== lastCommitCountRef.current) {
+      lastCommitCountRef.current = textEditCommitCount;
+      closeEditorRef.current();
+    }
+  }, [textEditCommitCount]);
+
+  useEffect(() => () => setActiveTextEditor(null), [setActiveTextEditor]);
 
   // Follower: mirror the host's view, keeping the host's centre point centred in OUR window
   useEffect(() => {
@@ -1038,7 +1128,7 @@ export const WhiteboardCanvas: React.FC = () => {
   const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (activeTool !== 'select' && activeTool !== 'text' && activeTool !== 'sticky_note') return;
     const { x, y } = screenToWorld(e.clientX, e.clientY);
-    const hit = pickTopmost(objects, x, y, 8 / zoom);
+    const hit = pickTextTarget(objects, x, y, 8 / zoom);
     if (hit) {
       setSelectedIds([hit.id]);
       beginEdit(hit);
@@ -1046,6 +1136,43 @@ export const WhiteboardCanvas: React.FC = () => {
   };
 
   const editorBounds: Bounds | null = editor ? getBounds(editor.base) : null;
+  const effectiveEditorBase: ShapeObject | null = editor
+    ? activeTextEditor
+      ? {
+          ...editor.base,
+          strokeColor: activeTextEditor.strokeColor,
+          fillColor: activeTextEditor.fillColor,
+          fontSize: activeTextEditor.fontSize,
+          fontFamily: activeTextEditor.fontFamily,
+          bold: activeTextEditor.bold,
+          italic: activeTextEditor.italic,
+          align: activeTextEditor.align,
+        }
+      : editor.base
+    : null;
+
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el || !effectiveEditorBase) return;
+    if (isCenteredShape(effectiveEditorBase.shapeType)) {
+      el.style.height = '0px';
+      const minLineH = Math.ceil((effectiveEditorBase.fontSize ?? 16) * zoom * 1.3);
+      el.style.height = `${Math.max(el.scrollHeight, minLineH)}px`;
+    } else {
+      el.style.height = '100%';
+    }
+  }, [
+    editor,
+    editorText,
+    zoom,
+    effectiveEditorBase?.fontSize,
+    effectiveEditorBase?.bold,
+    effectiveEditorBase?.italic,
+    effectiveEditorBase?.fontFamily,
+    effectiveEditorBase?.align,
+    effectiveEditorBase?.shapeType,
+    effectiveEditorBase?.width,
+  ]);
 
   // Pointer event handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1087,7 +1214,9 @@ export const WhiteboardCanvas: React.FC = () => {
         if (
           hit &&
           hit.type === 'shape' &&
-          (hit.shapeType === 'text' || hit.shapeType === 'sticky_note')
+          (hit.shapeType === 'text' ||
+            hit.shapeType === 'sticky_note' ||
+            (activeTool === 'text' && !isLinear(hit)))
         ) {
           setSelectedIds([hit.id]);
           beginEdit(hit);
@@ -1471,9 +1600,11 @@ export const WhiteboardCanvas: React.FC = () => {
       onPointerCancel={handlePointerCancel}
       onWheel={handleWheel}
       onDoubleClick={handleDoubleClick}
+      data-canvas-surface="true"
+      tabIndex={-1}
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
-      className={`relative h-full w-full overflow-hidden touch-none ${
+      className={`relative h-full w-full overflow-hidden touch-none outline-none ${
         isPanning
           ? 'cursor-grab active:cursor-grabbing'
           : activeTool === 'pen' || activeTool === 'laser'
@@ -1502,56 +1633,112 @@ export const WhiteboardCanvas: React.FC = () => {
       )}
 
       {/* Inline text editor (text boxes, sticky notes, text inside shapes) */}
-      {editor && editorBounds && (
-        <textarea
-          ref={textareaRef}
-          value={editorText}
-          placeholder={editor.base.shapeType === 'text' ? 'Type text...' : 'Type note...'}
-          onChange={(e) => setEditorText(e.target.value)}
-          onBlur={() => closeEditor(true)}
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Escape') {
-              closeEditor(false);
-            } else if (e.key === 'Enter') {
-              if (editor.base.shapeType === 'text' && !e.shiftKey) {
-                e.preventDefault();
-                closeEditor(true);
-              } else if (e.ctrlKey || e.metaKey) {
-                e.preventDefault();
-                closeEditor(true);
-              }
-            }
-          }}
-          className="absolute z-30 resize-none overflow-hidden rounded border-2 border-blue-500 p-1.5 outline-none shadow-lg"
-          style={{
-            left:
-              (editorBounds.x + panX) * zoom + (editor.base.shapeType === 'sticky_note' ? 8 : 0),
-            top: (editorBounds.y + panY) * zoom + (editor.base.shapeType === 'sticky_note' ? 8 : 0),
-            width: Math.max(
-              (editorBounds.w - (editor.base.shapeType === 'sticky_note' ? 16 : 0)) * zoom,
-              120,
-            ),
-            height: Math.max(
-              (editorBounds.h - (editor.base.shapeType === 'sticky_note' ? 16 : 0)) * zoom,
-              38,
-            ),
-            font: fontOf({ ...editor.base, fontSize: (editor.base.fontSize ?? 16) * zoom }),
-            textAlign: editor.base.align ?? 'left',
-            color:
-              editor.base.shapeType === 'sticky_note' ? STICKY_TEXT_COLOR : editor.base.strokeColor,
-            background:
-              editor.base.shapeType === 'sticky_note'
-                ? editor.base.fillColor
-                : isDarkTheme
-                  ? 'rgba(15, 23, 42, 0.92)'
-                  : 'rgba(255, 255, 255, 0.95)',
-          }}
-        />
-      )}
+      {editor &&
+        editorBounds &&
+        effectiveEditorBase &&
+        (() => {
+          const centered = isCenteredShape(effectiveEditorBase.shapeType);
+          const isSticky = effectiveEditorBase.shapeType === 'sticky_note';
+          const padPx = isSticky ? 8 : Math.max(4, Math.round(6 * zoom));
+          const boxLeft = (editorBounds.x + panX) * zoom + (isSticky ? 8 : 0);
+          const boxTop = (editorBounds.y + panY) * zoom + (isSticky ? 8 : 0);
+          const boxWidth = Math.max(
+            (editorBounds.w - (isSticky ? 16 : 0)) * zoom,
+            centered ? 48 : 120,
+          );
+          const boxHeight = Math.max(
+            (editorBounds.h - (isSticky ? 16 : 0)) * zoom,
+            centered ? 32 : 38,
+          );
+          const textAlign =
+            effectiveEditorBase.align ?? defaultShapeAlign(effectiveEditorBase.shapeType);
+          const placeholder =
+            effectiveEditorBase.shapeType === 'sticky_note' ? 'Type note...' : 'Type text...';
+
+          return (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                if (e.target !== textareaRef.current) {
+                  e.preventDefault();
+                  textareaRef.current?.focus();
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className={`absolute z-30 flex flex-col outline-none ${
+                centered
+                  ? 'justify-center ring-2 ring-blue-500/80'
+                  : 'justify-start border-2 border-blue-500 rounded shadow-lg'
+              }`}
+              style={{
+                left: boxLeft,
+                top: boxTop,
+                width: boxWidth,
+                height: boxHeight,
+                padding: centered ? padPx : 6,
+                borderRadius:
+                  effectiveEditorBase.shapeType === 'ellipse'
+                    ? '9999px'
+                    : centered
+                      ? `${Math.max(4, Math.round(6 * zoom))}px`
+                      : undefined,
+                background: centered
+                  ? 'transparent'
+                  : isSticky
+                    ? (effectiveEditorBase.fillColor ?? '#FDE68A')
+                    : isDarkTheme
+                      ? 'rgba(15, 23, 42, 0.92)'
+                      : 'rgba(255, 255, 255, 0.95)',
+              }}
+            >
+              <textarea
+                ref={textareaRef}
+                data-canvas-text-editor="true"
+                value={editorText}
+                rows={1}
+                placeholder={placeholder}
+                onChange={(e) => setEditorText(e.target.value)}
+                onBlur={(e) => {
+                  const related = e.relatedTarget;
+                  if (
+                    related instanceof Element &&
+                    related.closest('[data-property-bar="true"]') &&
+                    !related.closest('[data-property-bar-commit="true"]')
+                  ) {
+                    return;
+                  }
+                  closeEditor(true);
+                }}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Escape') {
+                    closeEditor(false);
+                  } else if (e.key === 'Enter') {
+                    if (effectiveEditorBase.shapeType === 'text' && !e.shiftKey) {
+                      e.preventDefault();
+                      closeEditor(true);
+                    } else if (e.ctrlKey || e.metaKey) {
+                      e.preventDefault();
+                      closeEditor(true);
+                    }
+                  }
+                }}
+                className="w-full max-h-full resize-none border-0 bg-transparent p-0 outline-none overflow-y-auto"
+                style={{
+                  height: centered ? undefined : '100%',
+                  font: fontOf({
+                    ...effectiveEditorBase,
+                    fontSize: (effectiveEditorBase.fontSize ?? 16) * zoom,
+                  }),
+                  lineHeight: 1.3,
+                  textAlign,
+                  color: shapeTextColor(effectiveEditorBase),
+                }}
+              />
+            </div>
+          );
+        })()}
 
       {/* Author Attribution Hover Tooltip (Active when using Select tool) */}
       {hoveredAuthor && (

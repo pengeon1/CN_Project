@@ -289,6 +289,43 @@ export function pickTopmost(
   return best;
 }
 
+/**
+ * Finds the topmost box/shape whose text can be edited at `(px, py)`.
+ * Checks `pickTopmost` first and falls back to the interior of unfilled rectangles/ellipses.
+ */
+export function pickTextTarget(
+  objects: Record<string, WhiteboardObject>,
+  px: number,
+  py: number,
+  tol: number,
+): ShapeObject | null {
+  const direct = pickTopmost(objects, px, py, tol);
+  if (direct && direct.type === 'shape' && !isLinear(direct)) {
+    return direct;
+  }
+  let best: ShapeObject | null = null;
+  for (const obj of Object.values(objects)) {
+    if (obj.type !== 'shape' || (obj.shapeType !== 'rectangle' && obj.shapeType !== 'ellipse')) {
+      continue;
+    }
+    const b = getBounds(obj);
+    const inside =
+      obj.shapeType === 'rectangle'
+        ? px >= b.x - tol && px <= b.x + b.w + tol && py >= b.y - tol && py <= b.y + b.h + tol
+        : (() => {
+            const rx = Math.max(b.w / 2, 1) + tol;
+            const ry = Math.max(b.h / 2, 1) + tol;
+            const dx = px - (b.x + b.w / 2);
+            const dy = py - (b.y + b.h / 2);
+            return (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1;
+          })();
+    if (inside && (!best || obj.zIndex >= best.zIndex)) {
+      best = obj;
+    }
+  }
+  return best;
+}
+
 /** Corner handle under the point for a single selected box-like object, or null. */
 export function pickHandle(
   obj: WhiteboardObject,
@@ -428,24 +465,61 @@ export function fontOf(s: ShapeObject): string {
   }`;
 }
 
+/** Shapes whose text defaults to centered alignment horizontally and vertically. */
+export function isCenteredShape(shapeType: ShapeObject['shapeType']): boolean {
+  return shapeType === 'rectangle' || shapeType === 'ellipse';
+}
+
+/** Default text alignment for a shape when `align` is not explicitly set. */
+export function defaultShapeAlign(
+  shapeType: ShapeObject['shapeType'],
+): 'left' | 'center' | 'right' {
+  return isCenteredShape(shapeType) ? 'center' : 'left';
+}
+
+function relativeLuminance(hex: string): number {
+  const n = parseInt(hex.replace('#', ''), 16);
+  if (!Number.isFinite(n)) return 0;
+  const [r = 0, g = 0, b = 0] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Picks a legible text color for a shape: keeps `strokeColor` (or sticky dark ink) when it
+ * contrasts cleanly with `fillColor`, and switches to `#FFFFFF` or `#111827` otherwise.
+ */
+export function shapeTextColor(s: ShapeObject): string {
+  const base = s.shapeType === 'sticky_note' ? STICKY_TEXT_COLOR : s.strokeColor;
+  const bg = s.shapeType === 'sticky_note' ? (s.fillColor ?? '#FDE68A') : s.fillColor;
+  if (!bg) return base;
+  const l1 = relativeLuminance(base);
+  const l2 = relativeLuminance(bg);
+  const contrast = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  if (contrast >= 2.6) return base;
+  return l2 < 0.35 ? '#FFFFFF' : STICKY_TEXT_COLOR;
+}
+
 /** Draws wrapped text inside the shape's box, honoring alignment. */
 function drawText(ctx: CanvasRenderingContext2D, s: ShapeObject, color: string): void {
   if (!s.text) return;
   const b = getBounds(s);
   const pad = s.shapeType === 'sticky_note' ? 12 : 6;
   const size = s.fontSize ?? 16;
+  const centered = isCenteredShape(s.shapeType);
+  const align = s.align ?? defaultShapeAlign(s.shapeType);
   ctx.save();
   ctx.font = fontOf(s);
   ctx.fillStyle = color;
   ctx.textBaseline = 'top';
-  ctx.textAlign = s.align ?? 'left';
+  ctx.textAlign = align;
   const lines = wrapText(ctx, s.text, Math.max(b.w - pad * 2, 10));
   const lineH = size * 1.3;
   const total = lines.length * lineH;
-  const centered = s.shapeType === 'rectangle' || s.shapeType === 'ellipse';
   let y = centered ? b.y + Math.max((b.h - total) / 2, pad) : b.y + pad;
-  const x =
-    s.align === 'center' ? b.x + b.w / 2 : s.align === 'right' ? b.x + b.w - pad : b.x + pad;
+  const x = align === 'center' ? b.x + b.w / 2 : align === 'right' ? b.x + b.w - pad : b.x + pad;
   ctx.beginPath();
   ctx.rect(b.x, b.y, b.w, b.h);
   ctx.clip();
@@ -475,7 +549,7 @@ export function renderShape(ctx: CanvasRenderingContext2D, s: ShapeObject, hideT
         ctx.fill();
       }
       if (s.strokeWidth > 0) ctx.stroke();
-      if (!hideText) drawText(ctx, s, s.strokeColor);
+      if (!hideText) drawText(ctx, s, shapeTextColor(s));
       break;
     case 'line':
     case 'arrow': {
@@ -571,10 +645,10 @@ export function renderShape(ctx: CanvasRenderingContext2D, s: ShapeObject, hideT
       ctx.roundRect(b.x, b.y, b.w, b.h, 4);
       ctx.fill();
       ctx.shadowColor = 'transparent';
-      if (!hideText) drawText(ctx, s, STICKY_TEXT_COLOR);
+      if (!hideText) drawText(ctx, s, shapeTextColor(s));
       break;
     case 'text':
-      if (!hideText) drawText(ctx, s, s.strokeColor);
+      if (!hideText) drawText(ctx, s, shapeTextColor(s));
       break;
   }
   ctx.restore();

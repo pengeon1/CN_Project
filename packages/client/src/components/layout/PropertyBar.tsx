@@ -4,21 +4,30 @@
  * stroke width, fill toggle, and typography settings.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Ban,
   Bold,
   BringToFront,
+  Check,
+  ChevronDown,
   Italic,
-  Paintbrush,
   SendToBack,
   Trash2,
+  Type,
 } from 'lucide-react';
 import type { ShapeObject } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
-import { colorChanges, lighten } from '../canvas/shapes.js';
+import {
+  colorChanges,
+  defaultShapeAlign,
+  isLinear,
+  lighten,
+  stickyFill,
+} from '../canvas/shapes.js';
 
 const PALETTE_SWATCHES = [
   '#000000', // Black
@@ -31,6 +40,17 @@ const PALETTE_SWATCHES = [
   '#EC4899', // Pink
 ];
 
+const FILL_TINT_SWATCHES = [
+  '#FFFFFF', // White
+  '#F1F5F9', // Slate
+  '#DBEAFE', // Soft Blue
+  '#DCFCE7', // Soft Green
+  '#FEF9C3', // Soft Yellow
+  '#FEE2E2', // Soft Red
+  '#F3E8FF', // Soft Purple
+  '#FCE7F3', // Soft Pink
+];
+
 const STROKE_WIDTHS = [
   { label: 'S', value: 2 },
   { label: 'M', value: 4 },
@@ -38,89 +58,233 @@ const STROKE_WIDTHS = [
   { label: 'XL', value: 16 },
 ];
 
-export const PropertyBar: React.FC = () => {
-  const {
-    activeTool,
-    toolProps,
-    setToolProps,
-    objects,
-    selectedIds,
-    updateObjects,
-    deleteObjects,
-    reorderObjects,
-  } = useWhiteboardStore();
+export type PropertyBarProps = Pick<
+  ReturnType<typeof useWhiteboardStore.getState>,
+  | 'activeTool'
+  | 'toolProps'
+  | 'setToolProps'
+  | 'objects'
+  | 'selectedIds'
+  | 'activeTextEditor'
+  | 'patchActiveTextEditor'
+  | 'requestTextEdit'
+  | 'requestCommitTextEdit'
+  | 'updateObjects'
+  | 'deleteObjects'
+  | 'reorderObjects'
+>;
 
-  // With the select tool the bar edits the selection (synced OBJECT_UPDATE); otherwise it sets
-  // the properties used by the next object drawn.
+export const PropertyBar: React.FC = () => {
+  const store = useWhiteboardStore();
+  return (
+    <PropertyBarContent
+      activeTool={store.activeTool}
+      toolProps={store.toolProps}
+      setToolProps={store.setToolProps}
+      objects={store.objects}
+      selectedIds={store.selectedIds}
+      activeTextEditor={store.activeTextEditor}
+      patchActiveTextEditor={store.patchActiveTextEditor}
+      requestTextEdit={store.requestTextEdit}
+      requestCommitTextEdit={store.requestCommitTextEdit}
+      updateObjects={store.updateObjects}
+      deleteObjects={store.deleteObjects}
+      reorderObjects={store.reorderObjects}
+    />
+  );
+};
+
+export const PropertyBarContent: React.FC<PropertyBarProps> = ({
+  activeTool,
+  toolProps,
+  setToolProps,
+  objects,
+  selectedIds,
+  activeTextEditor,
+  patchActiveTextEditor,
+  requestTextEdit,
+  requestCommitTextEdit,
+  updateObjects,
+  deleteObjects,
+  reorderObjects,
+}) => {
+  const [fillMenuOpen, setFillMenuOpen] = useState(false);
+
+  // Close the fill popover whenever tool, selection, or text edit target changes.
+  useEffect(() => {
+    setFillMenuOpen(false);
+  }, [activeTool, selectedIds, activeTextEditor?.objectId]);
+
+  useEffect(() => {
+    if (!fillMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!(e.target instanceof Element && e.target.closest('[data-fill-picker="true"]'))) {
+        setFillMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [fillMenuOpen]);
+
+  const editingLiveText = activeTextEditor !== null;
   const selection = selectedIds.map((id) => objects[id]).filter((o) => o !== undefined);
-  const editingSelection = activeTool === 'select' && selection.length > 0;
+  const editingSelection = !editingLiveText && activeTool === 'select' && selection.length > 0;
   const first = selection[0];
   const firstShape: ShapeObject | undefined = first?.type === 'shape' ? first : undefined;
-  const hasBoxText = selection.some(
+  const liveObj =
+    editingLiveText && activeTextEditor.objectId ? objects[activeTextEditor.objectId] : undefined;
+  const liveShape: ShapeObject | undefined = liveObj?.type === 'shape' ? liveObj : undefined;
+
+  const hasBoxText = selection.some((o) => o.type === 'shape' && !isLinear(o));
+  const hasFillable = selection.some(
     (o) =>
       o.type === 'shape' &&
-      o.shapeType !== 'line' &&
-      o.shapeType !== 'arrow' &&
-      o.shapeType !== 'connector',
+      (o.shapeType === 'rectangle' || o.shapeType === 'ellipse' || o.shapeType === 'sticky_note'),
   );
-  const hasFillable = selection.some(
+  const canClearSelectionFill = selection.some(
     (o) => o.type === 'shape' && (o.shapeType === 'rectangle' || o.shapeType === 'ellipse'),
   );
 
-  const current = editingSelection
+  const isShapeToolDefault = activeTool === 'rectangle' || activeTool === 'ellipse';
+  const current = editingLiveText
     ? {
-        color:
-          first?.type === 'stroke' ? first.color : (firstShape?.strokeColor ?? toolProps.color),
-        width:
-          first?.type === 'stroke' ? first.width : (firstShape?.strokeWidth ?? toolProps.width),
-        fill: firstShape ? firstShape.fillColor !== undefined : toolProps.fill,
-        bold: firstShape?.bold ?? false,
-        italic: firstShape?.italic ?? false,
-        align: firstShape?.align ?? 'left',
-        fontSize: firstShape?.fontSize ?? toolProps.fontSize,
+        color: activeTextEditor.strokeColor,
+        width: liveShape?.strokeWidth ?? toolProps.width,
+        fill: activeTextEditor.fillColor !== undefined,
+        fillColor: activeTextEditor.fillColor ?? null,
+        bold: activeTextEditor.bold,
+        italic: activeTextEditor.italic,
+        align: activeTextEditor.align,
+        fontSize: activeTextEditor.fontSize,
       }
-    : toolProps;
+    : editingSelection
+      ? {
+          color:
+            first?.type === 'stroke' ? first.color : (firstShape?.strokeColor ?? toolProps.color),
+          width:
+            first?.type === 'stroke' ? first.width : (firstShape?.strokeWidth ?? toolProps.width),
+          fill: firstShape ? firstShape.fillColor !== undefined : toolProps.fill,
+          fillColor: firstShape ? (firstShape.fillColor ?? null) : null,
+          bold: firstShape?.bold ?? false,
+          italic: firstShape?.italic ?? false,
+          align: firstShape
+            ? (firstShape.align ?? defaultShapeAlign(firstShape.shapeType))
+            : 'left',
+          fontSize: firstShape?.fontSize ?? toolProps.fontSize,
+        }
+      : {
+          color: toolProps.color,
+          width: toolProps.width,
+          fill: toolProps.fill,
+          fillColor: toolProps.fill
+            ? (toolProps.fillColor ?? lighten(toolProps.color, 0.75))
+            : null,
+          bold: toolProps.bold,
+          italic: toolProps.italic,
+          align: isShapeToolDefault ? (toolProps.shapeAlign ?? 'center') : toolProps.align,
+          fontSize: toolProps.fontSize,
+        };
 
-  const setColor = (color: string) =>
-    editingSelection
-      ? updateObjects(selectedIds, (o) => colorChanges(o, color))
-      : setToolProps({ color });
-  const setWidth = (width: number) =>
-    editingSelection
-      ? updateObjects(selectedIds, (o) =>
-          o.type === 'shape' && (o.shapeType === 'text' || o.shapeType === 'sticky_note')
-            ? {}
-            : { strokeWidth: width },
-        )
-      : setToolProps({ width });
-  const setFill = () =>
-    editingSelection
-      ? updateObjects(selectedIds, (o) =>
-          o.type === 'shape' && (o.shapeType === 'rectangle' || o.shapeType === 'ellipse')
-            ? { fillColor: o.fillColor ? null : lighten(o.strokeColor, 0.75) }
+  const setColor = (color: string) => {
+    if (editingLiveText) {
+      const nextFill = activeTextEditor.shapeType === 'sticky_note' ? stickyFill(color) : undefined;
+      patchActiveTextEditor({
+        strokeColor: color,
+        ...(nextFill !== undefined ? { fillColor: nextFill } : {}),
+      });
+      if (activeTextEditor.objectId) {
+        updateObjects([activeTextEditor.objectId], (o) => colorChanges(o, color));
+      } else {
+        setToolProps({ color });
+      }
+      return;
+    }
+    if (editingSelection) {
+      updateObjects(selectedIds, (o) => colorChanges(o, color));
+    } else {
+      setToolProps({ color });
+    }
+  };
+
+  const setWidth = (width: number) => {
+    const widthFor = (o: (typeof selection)[number]) =>
+      o.type === 'shape' && (o.shapeType === 'text' || o.shapeType === 'sticky_note')
+        ? {}
+        : { strokeWidth: width };
+    if (editingLiveText) {
+      if (activeTextEditor.objectId) {
+        updateObjects([activeTextEditor.objectId], widthFor);
+      }
+      setToolProps({ width });
+      return;
+    }
+    if (editingSelection) {
+      updateObjects(selectedIds, widthFor);
+    } else {
+      setToolProps({ width });
+    }
+  };
+
+  const setFillColor = (fillColor: string | null) => {
+    if (editingLiveText) {
+      patchActiveTextEditor({ fillColor });
+      if (activeTextEditor.objectId) {
+        updateObjects([activeTextEditor.objectId], (o) =>
+          o.type === 'shape' &&
+          (o.shapeType === 'rectangle' ||
+            o.shapeType === 'ellipse' ||
+            o.shapeType === 'sticky_note')
+            ? { fillColor }
             : {},
-        )
-      : setToolProps({ fill: !toolProps.fill });
+        );
+      }
+      return;
+    }
+    if (editingSelection) {
+      updateObjects(selectedIds, (o) =>
+        o.type === 'shape' &&
+        (o.shapeType === 'rectangle' || o.shapeType === 'ellipse' || o.shapeType === 'sticky_note')
+          ? { fillColor }
+          : {},
+      );
+    } else if (fillColor === null) {
+      setToolProps({ fill: false });
+    } else {
+      setToolProps({ fill: true, fillColor });
+    }
+  };
+
   const setText = (c: {
     bold?: boolean;
     italic?: boolean;
     align?: 'left' | 'center' | 'right';
     fontSize?: number;
-  }) =>
-    editingSelection
-      ? updateObjects(selectedIds, (o) =>
-          o.type === 'shape' &&
-          o.shapeType !== 'line' &&
-          o.shapeType !== 'arrow' &&
-          o.shapeType !== 'connector'
-            ? c
-            : {},
-        )
-      : setToolProps(c);
+  }) => {
+    if (editingLiveText) {
+      patchActiveTextEditor(c);
+      if (activeTextEditor.objectId) {
+        updateObjects([activeTextEditor.objectId], (o) =>
+          o.type === 'shape' && !isLinear(o) ? c : {},
+        );
+      } else {
+        setToolProps(c);
+      }
+      return;
+    }
+    if (editingSelection) {
+      updateObjects(selectedIds, (o) => (o.type === 'shape' && !isLinear(o) ? c : {}));
+    } else if (isShapeToolDefault && c.align !== undefined) {
+      const { align, ...rest } = c;
+      setToolProps({ ...rest, shapeAlign: align });
+    } else {
+      setToolProps(c);
+    }
+  };
+
   const nextAlign =
     current.align === 'left' ? 'center' : current.align === 'center' ? 'right' : 'left';
 
-  // Hide property bar on select / eraser unless custom properties apply
+  // Hide property bar on select / eraser unless custom properties or active text edit apply
   const isDrawingOrShape = [
     'pen',
     'rectangle',
@@ -132,39 +296,74 @@ export const PropertyBar: React.FC = () => {
     'sticky_note',
   ].includes(activeTool);
 
-  if (!isDrawingOrShape && !editingSelection) {
+  if (!isDrawingOrShape && !editingSelection && !editingLiveText) {
     return null;
   }
 
-  const isTextOrNote = editingSelection
-    ? hasBoxText
-    : activeTool === 'text' || activeTool === 'sticky_note';
-  const isShape = editingSelection
-    ? hasFillable
-    : activeTool === 'rectangle' || activeTool === 'ellipse';
+  const isTextOrNote = editingLiveText
+    ? true
+    : editingSelection
+      ? hasBoxText
+      : activeTool === 'text' ||
+        activeTool === 'sticky_note' ||
+        activeTool === 'rectangle' ||
+        activeTool === 'ellipse';
+
+  const isShape = editingLiveText
+    ? activeTextEditor.shapeType === 'rectangle' ||
+      activeTextEditor.shapeType === 'ellipse' ||
+      activeTextEditor.shapeType === 'sticky_note'
+    : editingSelection
+      ? hasFillable
+      : isShapeToolDefault;
+
+  const canClearFill = editingLiveText
+    ? activeTextEditor.shapeType === 'rectangle' || activeTextEditor.shapeType === 'ellipse'
+    : editingSelection
+      ? canClearSelectionFill
+      : isShapeToolDefault;
+
   // Line-only and text-only selections have no meaningful stroke width.
-  const showWidth = editingSelection
-    ? selection.some(
-        (o) =>
-          o.type === 'stroke' ||
-          (o.type === 'shape' && o.shapeType !== 'text' && o.shapeType !== 'sticky_note'),
-      )
-    : activeTool !== 'text' && activeTool !== 'sticky_note';
+  const showWidth = editingLiveText
+    ? activeTextEditor.shapeType === 'rectangle' || activeTextEditor.shapeType === 'ellipse'
+    : editingSelection
+      ? selection.some(
+          (o) =>
+            o.type === 'stroke' ||
+            (o.type === 'shape' && o.shapeType !== 'text' && o.shapeType !== 'sticky_note'),
+        )
+      : activeTool !== 'text' && activeTool !== 'sticky_note';
+
+  const canStartSingleTextEdit =
+    !editingLiveText &&
+    editingSelection &&
+    selection.length === 1 &&
+    first?.type === 'shape' &&
+    !isLinear(first);
 
   return (
     <div
+      data-property-bar="true"
       onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => {
+        // Keep focus inside the canvas inline text editor when clicking formatting/color buttons,
+        // while allowing native <input type="color"> pickers to open normally.
+        if (!(e.target instanceof HTMLInputElement)) {
+          e.preventDefault();
+        }
+        e.stopPropagation();
+      }}
       onClick={(e) => e.stopPropagation()}
-      className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex max-w-[calc(100%-260px)] items-center gap-2.5 rounded-xl border border-slate-700/80 bg-slate-900/95 px-3.5 py-1.5 shadow-xl backdrop-blur-xl select-none overflow-x-auto"
+      className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex max-w-[calc(100%-200px)] flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/95 px-3 py-1.5 shadow-xl backdrop-blur-xl select-none"
     >
-      {/* Color Swatches */}
+      {/* Stroke / Text Color Swatches */}
       <div className="flex items-center gap-1.5">
         {PALETTE_SWATCHES.map((color) => {
           const isSelected = current.color.toUpperCase() === color.toUpperCase();
           return (
             <button
               key={color}
+              type="button"
               onClick={() => setColor(color)}
               style={{ backgroundColor: color }}
               title={`Color: ${color}`}
@@ -178,93 +377,248 @@ export const PropertyBar: React.FC = () => {
         })}
       </div>
 
-      <div className="h-4 w-[1px] bg-slate-800" />
-
       {/* Stroke Width Buttons */}
       {showWidth && (
-        <div className="flex items-center gap-1">
-          {STROKE_WIDTHS.map((w) => {
-            const isSelected = current.width === w.value;
-            return (
-              <button
-                key={w.value}
-                onClick={() => setWidth(w.value)}
-                className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold transition ${
-                  isSelected
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-              >
-                {w.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Shape Fill Toggle */}
-      {isShape && (
         <>
           <div className="h-4 w-[1px] bg-slate-800" />
-          <button
-            onClick={setFill}
-            title="Toggle Shape Fill"
-            className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-              current.fill
-                ? 'bg-blue-600/30 text-blue-400 border border-blue-500/40'
-                : 'text-slate-400 hover:bg-slate-800'
-            }`}
-          >
-            <Paintbrush className="h-3.5 w-3.5" />
-            <span>Fill</span>
-          </button>
+          <div className="flex items-center gap-1">
+            {STROKE_WIDTHS.map((w) => {
+              const isSelected = current.width === w.value;
+              return (
+                <button
+                  key={w.value}
+                  type="button"
+                  onClick={() => setWidth(w.value)}
+                  className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold transition ${
+                    isSelected
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  {w.label}
+                </button>
+              );
+            })}
+          </div>
         </>
       )}
 
-      {/* Typography Controls */}
+      {/* Shape Fill Color Picker */}
+      {isShape && (
+        <>
+          <div className="h-4 w-[1px] bg-slate-800" />
+          <div className="relative flex items-center gap-1" data-fill-picker="true">
+            <button
+              type="button"
+              onClick={() => setFillMenuOpen((v) => !v)}
+              title="Choose shape fill color"
+              className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium transition ${
+                current.fillColor
+                  ? 'border-blue-500/40 bg-slate-800 text-slate-100 hover:bg-slate-700'
+                  : 'border-slate-700/80 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <span
+                className="relative h-3.5 w-3.5 rounded border border-slate-500/80 shrink-0 overflow-hidden"
+                style={{
+                  backgroundColor: current.fillColor ?? 'transparent',
+                }}
+              >
+                {!current.fillColor && (
+                  <span className="absolute inset-0 block bg-[linear-gradient(135deg,transparent_44%,#ef4444_45%,#ef4444_55%,transparent_56%)]" />
+                )}
+              </span>
+              <span>Fill</span>
+              <ChevronDown className="h-3 w-3 text-slate-400" />
+            </button>
+            {current.fillColor && canClearFill && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFillColor(null);
+                  setFillMenuOpen(false);
+                }}
+                title="Remove fill (transparent)"
+                className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-red-400 transition"
+              >
+                <Ban className="h-3 w-3" />
+              </button>
+            )}
+
+            {fillMenuOpen && (
+              <div
+                data-property-bar="true"
+                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 w-56 rounded-xl border border-slate-700/90 bg-slate-900/98 p-2.5 shadow-2xl backdrop-blur-xl"
+              >
+                <div className="mb-1.5 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  <span>Fill Color</span>
+                  {canClearFill && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFillColor(null);
+                        setFillMenuOpen(false);
+                      }}
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition ${
+                        !current.fillColor
+                          ? 'bg-blue-600/30 text-blue-300'
+                          : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      No Fill
+                    </button>
+                  )}
+                </div>
+                <div className="mb-2 grid grid-cols-8 gap-1">
+                  {FILL_TINT_SWATCHES.map((hex) => {
+                    const active = current.fillColor?.toUpperCase() === hex.toUpperCase();
+                    return (
+                      <button
+                        key={`tint-${hex}`}
+                        type="button"
+                        onClick={() => {
+                          setFillColor(hex);
+                          setFillMenuOpen(false);
+                        }}
+                        style={{ backgroundColor: hex }}
+                        title={`Fill tint: ${hex}`}
+                        className={`h-5 w-5 rounded-md border border-slate-600 transition ${
+                          active
+                            ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-slate-900 scale-110'
+                            : 'hover:scale-110'
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="mb-2 grid grid-cols-8 gap-1">
+                  {PALETTE_SWATCHES.map((hex) => {
+                    const active = current.fillColor?.toUpperCase() === hex.toUpperCase();
+                    return (
+                      <button
+                        key={`solid-${hex}`}
+                        type="button"
+                        onClick={() => {
+                          setFillColor(hex);
+                          setFillMenuOpen(false);
+                        }}
+                        style={{ backgroundColor: hex }}
+                        title={`Fill color: ${hex}`}
+                        className={`h-5 w-5 rounded-md border border-slate-600 transition ${
+                          active
+                            ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-slate-900 scale-110'
+                            : 'hover:scale-110'
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+                <label className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-700/80 bg-slate-800/70 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800">
+                  <span>Custom color</span>
+                  <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-400">
+                    <span>{current.fillColor ?? 'None'}</span>
+                    <input
+                      type="color"
+                      aria-label="Custom fill color"
+                      value={current.fillColor ?? '#DBEAFE'}
+                      onChange={(e) => setFillColor(e.target.value.toUpperCase())}
+                      className="h-5 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+                    />
+                  </span>
+                </label>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Text Edit & Typography Controls */}
       {isTextOrNote && (
         <>
           <div className="h-4 w-[1px] bg-slate-800" />
           <div className="flex items-center gap-1">
+            {canStartSingleTextEdit && (
+              <button
+                type="button"
+                onClick={() => requestTextEdit(first.id)}
+                title="Edit text inside selected shape (Double-click or Enter)"
+                className="mr-1 flex items-center gap-1 rounded-md border border-blue-500/40 bg-blue-600/20 px-2 py-1 text-xs font-medium text-blue-300 hover:bg-blue-600/35 transition"
+              >
+                <Type className="h-3 w-3" />
+                <span>Edit Text</span>
+              </button>
+            )}
             <button
+              type="button"
               onClick={() => setText({ bold: !current.bold })}
+              title="Bold"
               className={`flex h-6 w-6 items-center justify-center rounded transition ${
-                current.bold ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                current.bold
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
               <Bold className="h-3 w-3" />
             </button>
             <button
+              type="button"
               onClick={() => setText({ italic: !current.italic })}
+              title="Italic"
               className={`flex h-6 w-6 items-center justify-center rounded transition ${
-                current.italic ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+                current.italic
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
               <Italic className="h-3 w-3" />
             </button>
             <button
+              type="button"
               onClick={() => setText({ align: nextAlign })}
               title={`Alignment: ${current.align}`}
-              className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 transition"
+              className="flex h-6 w-6 items-center justify-center rounded text-slate-300 hover:bg-slate-800 hover:text-white transition"
             >
               {current.align === 'left' && <AlignLeft className="h-3 w-3" />}
               {current.align === 'center' && <AlignCenter className="h-3 w-3" />}
               {current.align === 'right' && <AlignRight className="h-3 w-3" />}
             </button>
             <button
+              type="button"
               onClick={() => setText({ fontSize: Math.max(8, current.fontSize - 2) })}
               title="Smaller text"
-              className="flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold text-slate-400 hover:bg-slate-800 transition"
+              className="flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold text-slate-300 hover:bg-slate-800 hover:text-white transition"
             >
               A-
             </button>
+            <span className="min-w-[24px] text-center text-[11px] font-medium tabular-nums text-slate-400">
+              {current.fontSize}
+            </span>
             <button
+              type="button"
               onClick={() => setText({ fontSize: Math.min(144, current.fontSize + 2) })}
               title="Larger text"
-              className="flex h-6 w-6 items-center justify-center rounded text-xs font-bold text-slate-400 hover:bg-slate-800 transition"
+              className="flex h-6 w-6 items-center justify-center rounded text-xs font-bold text-slate-300 hover:bg-slate-800 hover:text-white transition"
             >
               A+
             </button>
+            {editingLiveText && (
+              <button
+                type="button"
+                data-property-bar-commit="true"
+                onClick={() => {
+                  requestCommitTextEdit();
+                  const surface = document.querySelector<HTMLElement>(
+                    '[data-canvas-surface="true"]',
+                  );
+                  surface?.focus();
+                }}
+                title="Finish typing (Ctrl+Enter)"
+                className="ml-1 flex items-center gap-1 rounded-md bg-emerald-600/90 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-500 transition"
+              >
+                <Check className="h-3 w-3" />
+                <span>Done</span>
+              </button>
+            )}
           </div>
         </>
       )}
@@ -274,20 +628,23 @@ export const PropertyBar: React.FC = () => {
           <div className="h-4 w-[1px] bg-slate-800" />
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => reorderObjects(selectedIds, 'front')}
               title="Bring to front"
-              className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 transition"
+              className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
             >
               <BringToFront className="h-3.5 w-3.5" />
             </button>
             <button
+              type="button"
               onClick={() => reorderObjects(selectedIds, 'back')}
               title="Send to back"
-              className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 transition"
+              className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
             >
               <SendToBack className="h-3.5 w-3.5" />
             </button>
             <button
+              type="button"
               onClick={() => deleteObjects(selectedIds)}
               title="Delete (Del)"
               className="flex h-6 w-6 items-center justify-center rounded text-red-400 hover:bg-red-500/20 transition"

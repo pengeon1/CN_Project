@@ -19,6 +19,7 @@
 
 import { useEffect } from 'react';
 import { type CanvasTool, useWhiteboardStore } from '../store/useWhiteboardStore.js';
+import { isLinear } from '../components/canvas/shapes.js';
 
 export const TOOL_SHORTCUTS: Record<string, CanvasTool> = {
   v: 'select',
@@ -145,6 +146,26 @@ export function useKeyboardShortcuts(): void {
       // 4. Ignore if system modifier keys (Ctrl, Meta/Cmd, Alt) are held
       if (e.ctrlKey || e.metaKey || e.altKey) {
         return;
+      }
+
+      // Enter starts editing text inside a single selected shape / text box / sticky note
+      if (
+        e.key === 'Enter' &&
+        !(
+          e.target instanceof HTMLElement &&
+          e.target.closest('button, a, [role="button"], [role="dialog"]')
+        )
+      ) {
+        const state = useWhiteboardStore.getState();
+        if (state.activeTextEditor === null && state.selectedIds.length === 1) {
+          const selId = state.selectedIds[0];
+          const obj = selId ? state.objects[selId] : undefined;
+          if (obj && obj.type === 'shape' && !isLinear(obj)) {
+            e.preventDefault();
+            state.requestTextEdit(obj.id);
+            return;
+          }
+        }
       }
 
       // 5. Map single-key shortcuts to whiteboard tools

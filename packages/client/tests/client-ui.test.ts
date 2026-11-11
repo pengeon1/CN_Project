@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   createEnvelope,
   generateUuid,
@@ -16,6 +18,7 @@ import {
   consumeRemoteLaserPoints,
   useWhiteboardStore,
 } from '../src/store/useWhiteboardStore.js';
+import { PropertyBarContent } from '../src/components/layout/PropertyBar.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 import type { ElectronWhiteboardAPI } from '../src/types/ipc.js';
 
@@ -54,6 +57,10 @@ describe('Client UI & Store Suite', () => {
       lastAppliedSeq: 0,
       searchOpen: false,
       loadModalOpen: false,
+      selectedIds: [],
+      activeTextEditor: null,
+      textEditRequestId: null,
+      textEditCommitCount: 0,
     });
   });
 
@@ -1467,6 +1474,109 @@ describe('Client UI & Store Suite', () => {
       ]);
       // Queue drains completely on consumption
       expect(consumeRemoteLaserPoints(peerId)).toHaveLength(0);
+    });
+
+    it('supports independent fillColor, centered shape text state, and visible PropertyBar editing controls', () => {
+      const store = useWhiteboardStore.getState();
+
+      // Custom fillColor can be stored independently of stroke color without breaking default text align
+      store.setToolProps({ fill: true, fillColor: '#10B981', shapeAlign: 'center' });
+      const props = useWhiteboardStore.getState().toolProps;
+      expect(props.fill).toBe(true);
+      expect(props.fillColor).toBe('#10B981');
+      expect(props.align).toBe('left');
+      expect(props.shapeAlign).toBe('center');
+
+      // Selecting a shape shows Fill & Edit Text controls in PropertyBar
+      const rectId = generateUuid();
+      useWhiteboardStore.setState({
+        activeTool: 'select',
+        selectedIds: [rectId],
+        objects: {
+          [rectId]: {
+            id: rectId,
+            type: 'shape',
+            shapeType: 'rectangle',
+            x: 10,
+            y: 20,
+            width: 140,
+            height: 90,
+            strokeColor: '#18A0FB',
+            strokeWidth: 4,
+            fillColor: '#DBEAFE',
+            align: 'center',
+            authorId: 'u1',
+            seq: 1,
+            zIndex: 1,
+            updatedAt: Date.now(),
+          },
+        },
+      });
+      const selectedHtml = renderToStaticMarkup(
+        React.createElement(PropertyBarContent, useWhiteboardStore.getState()),
+      );
+      expect(selectedHtml).toContain('Fill');
+      expect(selectedHtml).toContain('Edit Text');
+      expect(selectedHtml).toContain('Alignment: center');
+
+      // While typing inside a shape or draft text box (even with activeTool='select' or 'text'),
+      // typography & Done controls stay visible and patchActiveTextEditor updates styles live
+      useWhiteboardStore.setState({ activeTool: 'select' });
+      useWhiteboardStore.getState().setActiveTextEditor({
+        objectId: rectId,
+        shapeType: 'rectangle',
+        strokeColor: '#18A0FB',
+        fillColor: '#DBEAFE',
+        fontSize: 16,
+        fontFamily: 'Inter, sans-serif',
+        bold: false,
+        italic: false,
+        align: 'center',
+      });
+      useWhiteboardStore
+        .getState()
+        .patchActiveTextEditor({ bold: true, fontSize: 22, fillColor: '#FEE2E2' });
+      const activeEditor = useWhiteboardStore.getState().activeTextEditor;
+      expect(activeEditor?.bold).toBe(true);
+      expect(activeEditor?.fontSize).toBe(22);
+      expect(activeEditor?.fillColor).toBe('#FEE2E2');
+
+      const editingHtml = renderToStaticMarkup(
+        React.createElement(PropertyBarContent, useWhiteboardStore.getState()),
+      );
+      expect(editingHtml).toContain('Done');
+      expect(editingHtml).toContain('Bold');
+      expect(editingHtml).toContain('22');
+      expect(editingHtml).toContain('Fill');
+
+      // Clearing fill removes fillColor from activeTextEditor
+      useWhiteboardStore.getState().patchActiveTextEditor({ fillColor: null });
+      expect(useWhiteboardStore.getState().activeTextEditor?.fillColor).toBeUndefined();
+
+      // Draft text editing (objectId=null, activeTool='text', selectedIds=[]) still renders Done & typography
+      useWhiteboardStore.setState({ activeTool: 'text', selectedIds: [] });
+      useWhiteboardStore.getState().setActiveTextEditor({
+        objectId: null,
+        shapeType: 'text',
+        strokeColor: '#000000',
+        fontSize: 18,
+        fontFamily: 'Inter, sans-serif',
+        bold: true,
+        italic: false,
+        align: 'left',
+      });
+      const draftHtml = renderToStaticMarkup(
+        React.createElement(PropertyBarContent, useWhiteboardStore.getState()),
+      );
+      expect(draftHtml).toContain('Done');
+      expect(draftHtml).toContain('18');
+
+      // Requesting text edit & commit bumps expected store coordination fields
+      useWhiteboardStore.getState().requestTextEdit(rectId);
+      expect(useWhiteboardStore.getState().textEditRequestId).toBe(rectId);
+      const beforeCommit = useWhiteboardStore.getState().textEditCommitCount;
+      useWhiteboardStore.getState().requestCommitTextEdit();
+      expect(useWhiteboardStore.getState().textEditCommitCount).toBe(beforeCommit + 1);
     });
   });
 });

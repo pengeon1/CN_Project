@@ -79,6 +79,20 @@ export interface ToolProperties {
   color: string;
   width: number;
   fill: boolean;
+  fillColor?: string;
+  fontSize: number;
+  fontFamily: string;
+  bold: boolean;
+  italic: boolean;
+  align: 'left' | 'center' | 'right';
+  shapeAlign?: 'left' | 'center' | 'right';
+}
+
+export interface ActiveTextEditorState {
+  objectId: string | null;
+  shapeType: 'rectangle' | 'ellipse' | 'sticky_note' | 'text';
+  strokeColor: string;
+  fillColor?: string;
   fontSize: number;
   fontFamily: string;
   bold: boolean;
@@ -147,6 +161,9 @@ export interface WhiteboardState {
   // Tool state
   activeTool: CanvasTool;
   toolProps: ToolProperties;
+  activeTextEditor: ActiveTextEditorState | null;
+  textEditRequestId: string | null;
+  textEditCommitCount: number;
 
   // Viewport (Pan & Zoom)
   zoom: number;
@@ -243,6 +260,18 @@ export interface WhiteboardState {
   deleteObjects: (ids: string[]) => void;
   reorderObjects: (ids: string[], direction: 'front' | 'back') => void;
   clearCanvas: () => void;
+  setActiveTextEditor: (editor: ActiveTextEditorState | null) => void;
+  patchActiveTextEditor: (patch: {
+    strokeColor?: string;
+    fillColor?: string | null;
+    fontSize?: number;
+    fontFamily?: string;
+    bold?: boolean;
+    italic?: boolean;
+    align?: 'left' | 'center' | 'right';
+  }) => void;
+  requestTextEdit: (id: string | null) => void;
+  requestCommitTextEdit: () => void;
   /**
    * Manually asks the server for everything after `lastSeq`. Gap recovery is normally automatic
    * (the main process does it); this exists for diagnostics and manual refresh.
@@ -435,6 +464,9 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     italic: false,
     align: 'left',
   },
+  activeTextEditor: null,
+  textEditRequestId: null,
+  textEditCommitCount: 0,
 
   zoom: 1.0,
   panX: 0,
@@ -464,6 +496,34 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   setToolProps: (props) => {
     set((state) => ({ toolProps: { ...state.toolProps, ...props } }));
+  },
+
+  setActiveTextEditor: (activeTextEditor) => {
+    set({ activeTextEditor });
+  },
+
+  patchActiveTextEditor: (patch) => {
+    set((state) => {
+      if (!state.activeTextEditor) return state;
+      const next: ActiveTextEditorState = { ...state.activeTextEditor };
+      if (patch.strokeColor !== undefined) next.strokeColor = patch.strokeColor;
+      if (patch.fillColor === null) delete next.fillColor;
+      else if (patch.fillColor !== undefined) next.fillColor = patch.fillColor;
+      if (patch.fontSize !== undefined) next.fontSize = patch.fontSize;
+      if (patch.fontFamily !== undefined) next.fontFamily = patch.fontFamily;
+      if (patch.bold !== undefined) next.bold = patch.bold;
+      if (patch.italic !== undefined) next.italic = patch.italic;
+      if (patch.align !== undefined) next.align = patch.align;
+      return { activeTextEditor: next };
+    });
+  },
+
+  requestTextEdit: (textEditRequestId) => {
+    set({ textEditRequestId });
+  },
+
+  requestCommitTextEdit: () => {
+    set((state) => ({ textEditCommitCount: state.textEditCommitCount + 1 }));
   },
 
   setZoom: (zoomOrFn) => {
@@ -1324,6 +1384,8 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         return {
           objects: nextObjects,
           selectedIds: state.selectedIds.filter((s) => s !== id),
+          activeTextEditor: state.activeTextEditor?.objectId === id ? null : state.activeTextEditor,
+          textEditRequestId: state.textEditRequestId === id ? null : state.textEditRequestId,
           undoStack: [...state.undoStack, op_id],
           redoStack: [],
         };

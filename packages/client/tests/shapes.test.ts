@@ -12,17 +12,21 @@ import {
 import { applySequencedOpToObjects } from '../src/store/useWhiteboardStore.js';
 import {
   colorChanges,
+  defaultShapeAlign,
   findNearestAnchor,
   getBounds,
   getConnectorWaypoints,
   getObjectAnchors,
   hitTest,
+  isCenteredShape,
   lighten,
   moveChanges,
   pickHandle,
+  pickTextTarget,
   pickTopmost,
   recomputeBoundConnector,
   resizeChanges,
+  shapeTextColor,
   stickyFill,
 } from '../src/components/canvas/shapes.js';
 
@@ -195,5 +199,40 @@ describe('Phase 12 client', () => {
       startAnchor: null,
       endAnchor: null,
     });
+  });
+
+  it('defaults shape text alignment to center, keeps contrasting text color, and targets unfilled shapes', () => {
+    expect(isCenteredShape('rectangle')).toBe(true);
+    expect(isCenteredShape('ellipse')).toBe(true);
+    expect(isCenteredShape('text')).toBe(false);
+    expect(isCenteredShape('sticky_note')).toBe(false);
+
+    expect(defaultShapeAlign('rectangle')).toBe('center');
+    expect(defaultShapeAlign('ellipse')).toBe('center');
+    expect(defaultShapeAlign('text')).toBe('left');
+    expect(defaultShapeAlign('sticky_note')).toBe('left');
+
+    // Legible contrast keeps stroke color; same-color fills switch to contrasting ink
+    expect(shapeTextColor(mk({ strokeColor: '#000000', fillColor: '#FFFFFF' }))).toBe('#000000');
+    expect(shapeTextColor(mk({ strokeColor: '#000000', fillColor: '#000000' }))).toBe('#FFFFFF');
+    expect(shapeTextColor(mk({ strokeColor: '#18A0FB', fillColor: '#18A0FB' }))).toBe('#FFFFFF');
+    expect(shapeTextColor(mk({ strokeColor: '#FFFFFF', fillColor: '#FFFFFF' }))).toBe('#111827');
+
+    // Unfilled rectangle & ellipse interiors remain targetable for text editing
+    const rect = mk({ x: 0, y: 0, width: 120, height: 80, zIndex: 1 });
+    const ellipse = mk({
+      shapeType: 'ellipse',
+      x: 200,
+      y: 0,
+      width: 100,
+      height: 80,
+      zIndex: 2,
+    });
+    const objs: Record<string, WhiteboardObject> = { [rect.id]: rect, [ellipse.id]: ellipse };
+    expect(pickTopmost(objs, 60, 40, 4)).toBeNull();
+    expect(pickTextTarget(objs, 60, 40, 4)?.id).toBe(rect.id);
+    expect(pickTextTarget(objs, 250, 40, 4)?.id).toBe(ellipse.id);
+    // Corner outside ellipse semi-axes should not match
+    expect(pickTextTarget(objs, 202, 2, 2)).toBeNull();
   });
 });

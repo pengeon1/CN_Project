@@ -294,4 +294,34 @@ describe('Server Core Integration Suite: Sessions, Rooms & Participants', () => 
     const joinedMsg = await client1.waitFor(MessageType.PARTICIPANT_JOINED);
     expect(joinedMsg.seq).toBe(2);
   });
+
+  it('tracks activeRoomCount and schedules cleanup for empty rooms', async () => {
+    const client = await SocketTestClient.connect(serverPort);
+    activeClients.push(client);
+    client.send(MessageType.HELLO, { clientVersion: '0.1.0' });
+    const auth = await client.waitFor(MessageType.AUTH_OK);
+    const userId = (auth.payload as { userId: string }).userId;
+
+    client.send(
+      MessageType.CREATE_ROOM,
+      { roomName: 'Auto Cleanup Test', username: 'Host' },
+      { user_id: userId },
+    );
+    const roomState = await client.waitFor(MessageType.ROOM_STATE);
+    const roomCode = (roomState.payload as RoomStatePayload).roomCode;
+
+    // Room is active
+    expect(serverInstance?.roomManager.activeRoomCount).toBe(1);
+
+    // Host leaves room
+    client.send(MessageType.LEAVE_ROOM, { reason: 'Done' }, { room: roomCode, user_id: userId });
+    await client.waitFor(MessageType.ACK);
+
+    // Active room count drops to 0 immediately
+    expect(serverInstance?.roomManager.activeRoomCount).toBe(0);
+
+    // Explicit closeRoom removes it from roomCount
+    serverInstance?.roomManager.closeRoom(roomCode);
+    expect(serverInstance?.roomManager.roomCount).toBe(0);
+  });
 });

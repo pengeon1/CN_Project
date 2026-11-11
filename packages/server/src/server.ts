@@ -1488,7 +1488,7 @@ export class WhiteboardServer {
           this.discovery = new DiscoveryResponder({
             port: this.discoveryPort,
             tcpPort: boundPort,
-            getRoomCount: () => this.roomManager.roomCount,
+            getRoomCount: () => this.roomManager.activeRoomCount,
           });
           void this.discovery.start();
         }

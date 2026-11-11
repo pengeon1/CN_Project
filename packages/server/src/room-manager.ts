@@ -11,18 +11,22 @@ import type { ClientSession } from './session.js';
 
 const JOIN_FAILURE_LIMIT = 5;
 const JOIN_FAILURE_WINDOW_MS = 60_000;
+const DEFAULT_EMPTY_ROOM_TTL_MS = 60_000;
 
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
+  private emptyRoomTimers: Map<string, NodeJS.Timeout> = new Map();
   private failedJoinAttempts = new Map<string, number[]>();
   private logger = new Logger('RoomManager');
   private readonly onRoomChange: (room: Room) => void;
+  private readonly emptyRoomTtlMs: number;
 
   /**
    * Creates the room registry and installs its durable-change callback.
    */
-  constructor(onRoomChange: (room: Room) => void) {
+  constructor(onRoomChange: (room: Room) => void, emptyRoomTtlMs = DEFAULT_EMPTY_ROOM_TTL_MS) {
     this.onRoomChange = onRoomChange;
+    this.emptyRoomTtlMs = emptyRoomTtlMs;
   }
 
   /**
@@ -223,6 +227,13 @@ export class RoomManager {
         this.leaveRoom(session, 'Switching rooms');
       }
 
+      // Cancel pending auto-close timer if participant rejoins
+      const pendingTimer = this.emptyRoomTimers.get(normalizedCode);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        this.emptyRoomTimers.delete(normalizedCode);
+      }
+
       room.addParticipant(session, username, undefined, sessionToken);
       return { room, resumed };
     } catch (error) {
@@ -243,13 +254,47 @@ export class RoomManager {
       // participant who has already resumed on a newer connection.
       room.removeParticipant(session.userId, reason, session);
       if (room.participantCount === 0) {
-        this.logger.info(
-          `Room [${room.code}] is now empty; retaining room in memory for reconnects.`,
-        );
+        this.scheduleEmptyRoomCleanup(room.code);
       }
     }
 
     session.roomCode = null;
+  }
+
+  /**
+   * Schedules automatic closure and memory release for a room that has zero active participants.
+   */
+  private scheduleEmptyRoomCleanup(code: string): void {
+    if (this.emptyRoomTimers.has(code)) return;
+    this.logger.info(
+      `Room [${code}] is now empty; scheduling auto-closure in ${Math.round(this.emptyRoomTtlMs / 1000)}s if not resumed.`,
+    );
+    const timer = setTimeout(() => {
+      this.emptyRoomTimers.delete(code);
+      const room = this.rooms.get(code);
+      if (room && room.participantCount === 0) {
+        this.closeRoom(code, 'Inactivity timeout');
+      }
+    }, this.emptyRoomTtlMs);
+    timer.unref?.();
+    this.emptyRoomTimers.set(code, timer);
+  }
+
+  /**
+   * Manually or automatically closes and deletes a room from the active registry.
+   */
+  public closeRoom(code: string, reason = 'Room closed'): boolean {
+    const normalizedCode = code.trim().toUpperCase();
+    const pendingTimer = this.emptyRoomTimers.get(normalizedCode);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      this.emptyRoomTimers.delete(normalizedCode);
+    }
+    const room = this.rooms.get(normalizedCode);
+    if (!room) return false;
+    this.rooms.delete(normalizedCode);
+    this.logger.info(`Closed and removed room [${normalizedCode}]: ${reason}`);
+    return true;
   }
 
   /**
@@ -260,9 +305,20 @@ export class RoomManager {
   }
 
   /**
-   * Returns the count of active rooms.
+   * Returns the total count of rooms in memory.
    */
   public get roomCount(): number {
     return this.rooms.size;
+  }
+
+  /**
+   * Returns the count of rooms that currently have active connected participants.
+   */
+  public get activeRoomCount(): number {
+    let count = 0;
+    for (const room of this.rooms.values()) {
+      if (room.participantCount > 0) count++;
+    }
+    return count;
   }
 }

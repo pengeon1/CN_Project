@@ -18,11 +18,14 @@ win:
       arch: [x64]
     - target: portable
       arch: [x64]
-  artifactName: LAN-Whiteboard-${version}-win-x64-${target}.${ext}
 nsis:
+  # Target-specific artifactName because electron-builder has no ${target} macro.
+  artifactName: LAN-Whiteboard-${version}-win-x64-nsis.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
+portable:
+  artifactName: LAN-Whiteboard-${version}-win-x64-portable.${ext}
 
 mac:
   category: public.app-category.productivity

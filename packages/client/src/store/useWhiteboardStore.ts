@@ -1069,8 +1069,12 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
     const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1200;
     const viewportH = typeof window !== 'undefined' ? window.innerHeight - 56 : 800;
-    const nextPanX = viewportW / (2 * zoom) - centerX;
-    const nextPanY = viewportH / (2 * zoom) - centerY;
+    const safeZoom = zoom > 0 ? zoom : 1.0;
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerY)) return;
+
+    const nextPanX = viewportW / (2 * safeZoom) - centerX;
+    const nextPanY = viewportH / (2 * safeZoom) - centerY;
+    if (!Number.isFinite(nextPanX) || !Number.isFinite(nextPanY)) return;
 
     set({
       panX: Math.round(nextPanX),

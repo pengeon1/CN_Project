@@ -111,12 +111,14 @@ export const SearchDialog: React.FC = () => {
 
     // 2. Search chat history
     for (const msg of chatMessages) {
-      if (msg.message.toLowerCase().includes(q) || msg.username.toLowerCase().includes(q)) {
+      const text = msg.text ?? '';
+      const authorName = msg.username ?? 'User';
+      if (text.toLowerCase().includes(q) || authorName.toLowerCase().includes(q)) {
         matches.push({
           id: `chat-${msg.id}`,
           category: 'chat',
-          title: `${msg.username}: ${msg.message.slice(0, 40)}`,
-          snippet: msg.message.length > 40 ? msg.message.slice(40, 90) + '…' : undefined,
+          title: `${authorName}: ${text ? text.slice(0, 40) : 'Chat message'}`,
+          snippet: text.length > 40 ? text.slice(40, 90) + '…' : undefined,
           action: () => {
             setRightPanelOpen(true);
             setRightPanelTab('chat');
@@ -128,15 +130,17 @@ export const SearchDialog: React.FC = () => {
 
     // 3. Search participants
     for (const p of participants) {
-      if (p.username.toLowerCase().includes(q) || p.role.toLowerCase().includes(q)) {
+      const username = p.username ?? 'Collaborator';
+      const roleStr = p.role ?? 'EDITOR';
+      if (username.toLowerCase().includes(q) || roleStr.toLowerCase().includes(q)) {
         matches.push({
           id: `user-${p.id}`,
           category: 'user',
-          title: p.username,
-          snippet: `Role: ${p.role}`,
+          title: username,
+          snippet: `Role: ${roleStr}`,
           action: () => {
             setRightPanelOpen(true);
-            setRightPanelTab('users');
+            setRightPanelTab('participants');
             setSearchOpen(false);
           },
         });

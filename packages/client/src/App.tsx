@@ -17,6 +17,7 @@ import { ConnectDialog } from './components/dialogs/ConnectDialog.js';
 import { ShareDialog } from './components/dialogs/ShareDialog.js';
 import { ClearCanvasDialog } from './components/dialogs/ClearCanvasDialog.js';
 import { AccessNoticeDialog } from './components/dialogs/AccessNoticeDialog.js';
+import { VersionHistoryDialog } from './components/dialogs/VersionHistoryDialog.js';
 import { ProfileSettingsDialog } from './components/dialogs/ProfileSettingsDialog.js';
 
 export const App: React.FC = () => {
@@ -92,6 +93,7 @@ export const App: React.FC = () => {
       <ClearCanvasDialog />
       <AccessNoticeDialog />
       <ProfileSettingsDialog />
+      <VersionHistoryDialog />
     </div>
   );
 };

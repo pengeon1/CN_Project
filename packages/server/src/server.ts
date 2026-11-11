@@ -25,6 +25,10 @@ import {
   createEnvelope,
   type CursorMovePayload,
   type ErasePayload,
+  type PresentationPayload,
+  type VersionListPayload,
+  type VersionRestorePayload,
+  type VersionSavePayload,
   type ImageAddPayload,
   type ImageChunkPayload,
   IMAGE_CHUNK_BYTES,
@@ -873,6 +877,96 @@ export class WhiteboardServer {
             ),
           );
         }
+        break;
+      }
+
+      case MessageType.PRESENTATION: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (
+          !this.authorize(
+            session,
+            envelope,
+            room,
+            isHost(session.role),
+            'Only the host can present',
+          )
+        ) {
+          return;
+        }
+        const payload = validatePayload<PresentationPayload>(
+          MessageType.PRESENTATION,
+          envelope.payload,
+        );
+        // Ephemeral and latest-wins: stored for late joiners, relayed unsequenced to everyone else.
+        room.presentation = payload.active ? payload : { active: false };
+        room.broadcast(
+          createEnvelope(MessageType.PRESENTATION, room.presentation, {
+            msg_id: envelope.msg_id,
+            seq: 0,
+            room: room.code,
+            user_id: session.userId,
+            ts: Date.now(),
+          }),
+          session.userId,
+        );
+        break;
+      }
+
+      case MessageType.VERSION_SAVE:
+      case MessageType.VERSION_LIST:
+      case MessageType.VERSION_RESTORE: {
+        const room = this.requireRoom(session, envelope, 'You must join a room first');
+        if (!room) return;
+        if (
+          !this.authorize(
+            session,
+            envelope,
+            room,
+            isHost(session.role),
+            'Only the host can manage version history',
+          )
+        ) {
+          return;
+        }
+        const payload = validatePayload<
+          VersionSavePayload | VersionListPayload | VersionRestorePayload
+        >(envelope.type, envelope.payload);
+
+        await room.enqueue(() => {
+          const sendList = () =>
+            session.send(
+              createEnvelope(
+                MessageType.VERSION_LIST,
+                { versions: room.listVersions() },
+                { msg_id: envelope.msg_id, room: room.code, user_id: session.userId },
+              ),
+            );
+
+          if (envelope.type === MessageType.VERSION_SAVE) {
+            room.addVersion((payload as VersionSavePayload).name, session.userId, false);
+          } else if (envelope.type === MessageType.VERSION_RESTORE) {
+            const restored = room.restoreVersion((payload as VersionRestorePayload).versionId);
+            if (!restored) {
+              this.sendError(
+                session,
+                'VERSION_NOT_FOUND',
+                'That version no longer exists',
+                envelope,
+                room.code,
+              );
+              return;
+            }
+            room.recordEvent(
+              MessageType.VERSION_RESTORE,
+              { versionId: restored.id },
+              session.userId,
+            );
+            room.recordSystemMessage(`The host restored the board to "${restored.name}".`);
+            room.broadcastSnapshot();
+          }
+          sendList();
+        });
         break;
       }
 

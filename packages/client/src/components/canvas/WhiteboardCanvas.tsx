@@ -7,10 +7,12 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { Minus, Plus, Radio, RotateCcw } from 'lucide-react';
 import { getStroke } from 'perfect-freehand';
 import {
   CURSOR_THROTTLE_MS,
+  isHost,
+  PRESENTATION_HEARTBEAT_MS,
   type Point,
   type RemoteCursor,
   STROKE_BATCH_INTERVAL_MS,
@@ -76,6 +78,72 @@ interface HoveredAuthorInfo {
 }
 
 const ERASER_RADIUS = 16;
+/** How long a laser trail stays visible after the pointer moves on. */
+const LASER_TTL_MS = 900;
+
+interface LaserTrail {
+  color: string;
+  pts: Array<{ x: number; y: number; t: number }>;
+}
+
+/** Appends a world-space point to a user's laser trail unless the pointer has not moved. */
+function addLaserPoint(
+  trails: Map<string, LaserTrail>,
+  id: string,
+  color: string,
+  x: number,
+  y: number,
+  t: number,
+): void {
+  let trail = trails.get(id);
+  if (!trail) {
+    trail = { color, pts: [] };
+    trails.set(id, trail);
+  }
+  trail.color = color;
+  const last = trail.pts[trail.pts.length - 1];
+  if (!last || last.x !== x || last.y !== y) trail.pts.push({ x, y, t });
+}
+
+/** Draws a fading glowing trail ending in a bright dot (screen space). */
+function renderLaserTrail(
+  ctx: CanvasRenderingContext2D,
+  trail: LaserTrail,
+  zoom: number,
+  panX: number,
+  panY: number,
+  now: number,
+): void {
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = trail.color;
+  ctx.shadowColor = trail.color;
+  ctx.shadowBlur = 10;
+  for (let i = 1; i < trail.pts.length; i++) {
+    const a = trail.pts[i - 1]!;
+    const b = trail.pts[i]!;
+    ctx.globalAlpha = Math.max(0, 1 - (now - b.t) / LASER_TTL_MS);
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo((a.x + panX) * zoom, (a.y + panY) * zoom);
+    ctx.lineTo((b.x + panX) * zoom, (b.y + panY) * zoom);
+    ctx.stroke();
+  }
+  const head = trail.pts[trail.pts.length - 1];
+  if (head) {
+    ctx.globalAlpha = Math.max(0, 1 - (now - head.t) / LASER_TTL_MS);
+    ctx.fillStyle = trail.color;
+    ctx.beginPath();
+    ctx.arc((head.x + panX) * zoom, (head.y + panY) * zoom, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc((head.x + panX) * zoom, (head.y + panY) * zoom, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
 
 /**
  * Renders a single freehand stroke onto the 2D canvas using perfect-freehand outline polygon.
@@ -217,6 +285,10 @@ export const WhiteboardCanvas: React.FC = () => {
     imageData,
     ensureImages,
     setSelectedIds,
+    setPan,
+    presentation,
+    sendPresentationViewport,
+    endStalePresentation,
     setActiveTool,
     addShape,
     updateObjects,
@@ -249,6 +321,14 @@ export const WhiteboardCanvas: React.FC = () => {
   const [draft, setDraft] = useState<ShapeObject | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [imageTick, setImageTick] = useState(0);
+  const laserTrails = useRef<Map<string, LaserTrail>>(new Map());
+  const laserTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPresentSend = useRef(0);
+
+  // Presentation: the host drives; everyone else has a locked, mirrored view.
+  const amHost = currentUser ? isHost(currentUser.role) : false;
+  const presenting = presentation.active && amHost;
+  const following = presentation.active && !amHost;
   const [editorText, setEditorText] = useState('');
   const editorClosedRef = useRef(false);
 
@@ -418,12 +498,44 @@ export const WhiteboardCanvas: React.FC = () => {
     ctx.restore();
 
     // 4. Screen space elements (remote cursors & labels remain constant physical size)
+    const nowMs = Date.now();
     for (const cursor of Object.values(remoteCursors)) {
+      if (cursor.activeTool === 'laser') {
+        addLaserPoint(laserTrails.current, cursor.userId, cursor.color, cursor.x, cursor.y, nowMs);
+        continue; // drawn as a laser below instead of an arrow
+      }
       const sx = (cursor.x + panX) * zoom;
       const sy = (cursor.y + panY) * zoom;
       if (sx >= -50 && sx <= width + 50 && sy >= -50 && sy <= height + 50) {
         renderRemoteCursor(ctx, cursor, sx, sy);
       }
+    }
+
+    // Laser pointers (local and remote): fade out, and keep repainting until they are gone
+    let trailAlive = false;
+    for (const [id, trail] of laserTrails.current) {
+      trail.pts = trail.pts.filter((p) => nowMs - p.t < LASER_TTL_MS);
+      if (trail.pts.length === 0) {
+        laserTrails.current.delete(id);
+        continue;
+      }
+      trailAlive = true;
+      renderLaserTrail(ctx, trail, zoom, panX, panY, nowMs);
+      const owner = remoteCursors[id];
+      const head = trail.pts[trail.pts.length - 1]!;
+      if (owner) {
+        ctx.save();
+        ctx.font = '600 11px Inter, system-ui, sans-serif';
+        ctx.fillStyle = trail.color;
+        ctx.fillText(owner.username, (head.x + panX) * zoom + 12, (head.y + panY) * zoom - 10);
+        ctx.restore();
+      }
+    }
+    if (trailAlive && laserTimer.current === null) {
+      laserTimer.current = setTimeout(() => {
+        laserTimer.current = null;
+        setImageTick((t) => t + 1);
+      }, 33);
     }
 
     // 5. Render eraser reticle indicator when eraser tool is active
@@ -584,6 +696,52 @@ export const WhiteboardCanvas: React.FC = () => {
     }
   };
 
+  // Follower: mirror the host's view, keeping the host's centre point centred in OUR window
+  useEffect(() => {
+    const view = presentation.viewport;
+    const el = containerRef.current;
+    if (!following || !view || !el) return;
+    const rect = el.getBoundingClientRect();
+    setZoom(view.zoom);
+    const z = useWhiteboardStore.getState().zoom;
+    setPan(rect.width / (2 * z) - view.x, rect.height / (2 * z) - view.y);
+  }, [following, presentation, setZoom, setPan]);
+
+  // Presenter: broadcast the centre of the view (rate-limited, trailing edge), plus a heartbeat
+  const sendView = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const s = useWhiteboardStore.getState();
+    sendPresentationViewport(
+      rect.width / (2 * s.zoom) - s.panX,
+      rect.height / (2 * s.zoom) - s.panY,
+      s.zoom,
+    );
+  }, [sendPresentationViewport]);
+
+  useEffect(() => {
+    if (!presenting) return;
+    const wait = Math.max(0, lastPresentSend.current + 50 - Date.now());
+    const t = setTimeout(() => {
+      lastPresentSend.current = Date.now();
+      sendView();
+    }, wait);
+    return () => clearTimeout(t);
+  }, [presenting, zoom, panX, panY, sendView]);
+
+  useEffect(() => {
+    if (!presenting) return;
+    const i = setInterval(sendView, PRESENTATION_HEARTBEAT_MS);
+    return () => clearInterval(i);
+  }, [presenting, sendView]);
+
+  // Follower safety net: a presentation whose host went silent ends by itself
+  useEffect(() => {
+    const i = setInterval(endStalePresentation, 2000);
+    return () => clearInterval(i);
+  }, [endStalePresentation]);
+
   // Fetch bytes for any image on the board we do not have yet (late join, resync, new upload).
   useEffect(() => {
     ensureImages();
@@ -644,7 +802,10 @@ export const WhiteboardCanvas: React.FC = () => {
   // Pointer event handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // Middle click or Space/Alt + Primary triggers pan
-    if (e.button === 1 || isSpacePressedRef.current || (e.button === 0 && e.altKey)) {
+    if (
+      !following &&
+      (e.button === 1 || isSpacePressedRef.current || (e.button === 0 && e.altKey))
+    ) {
       setIsPanning(true);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       e.preventDefault();
@@ -791,6 +952,11 @@ export const WhiteboardCanvas: React.FC = () => {
       }
     }
 
+    if (activeTool === 'laser') {
+      addLaserPoint(laserTrails.current, 'local', currentUser?.color ?? '#EF4444', x, y, now);
+      setImageTick((t) => t + 1);
+    }
+
     // Throttled cursor broadcast
     if (now - lastCursorSendRef.current >= CURSOR_THROTTLE_MS) {
       broadcastCursorPosition(x, y, e.pressure);
@@ -914,6 +1080,7 @@ export const WhiteboardCanvas: React.FC = () => {
 
   // Zoom via Ctrl/Cmd + Wheel or two-finger trackpad pinch
   const handleWheel = (e: React.WheelEvent) => {
+    if (following) return; // the presenter controls the view
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
@@ -938,7 +1105,7 @@ export const WhiteboardCanvas: React.FC = () => {
       className={`relative h-full w-full overflow-hidden touch-none ${
         isPanning
           ? 'cursor-grab active:cursor-grabbing'
-          : activeTool === 'pen'
+          : activeTool === 'pen' || activeTool === 'laser'
             ? 'cursor-crosshair'
             : activeTool === 'eraser'
               ? 'cursor-none'
@@ -952,6 +1119,16 @@ export const WhiteboardCanvas: React.FC = () => {
         className="block h-full w-full pointer-events-none"
         style={{ imageRendering: 'auto' }}
       />
+
+      {/* Presentation status */}
+      {(presenting || following) && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-blue-600/95 px-4 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur">
+          <Radio className="h-3.5 w-3.5 animate-pulse" />
+          {presenting
+            ? 'You are presenting: everyone follows your view'
+            : `Following ${participants.find((p) => p.role === 'HOST')?.username ?? 'the host'}'s presentation`}
+        </div>
+      )}
 
       {/* Inline text editor (text boxes, sticky notes, text inside shapes) */}
       {editor && editorBounds && (
@@ -1002,6 +1179,7 @@ export const WhiteboardCanvas: React.FC = () => {
       {/* Floating Bottom-Right Zoom Control (never overlaps PropertyBar) */}
       <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-xl border border-slate-700/80 bg-slate-900/95 px-2 py-1 shadow-xl backdrop-blur-xl select-none text-slate-200">
         <button
+          disabled={following}
           onClick={() => setZoom((prev) => prev * 0.85)}
           title="Zoom out"
           className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition"
@@ -1010,6 +1188,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </button>
 
         <button
+          disabled={following}
           onClick={() => resetView()}
           title="Reset zoom to 100%"
           className="px-1.5 text-xs font-mono font-semibold text-slate-200 hover:text-blue-400 transition"
@@ -1018,6 +1197,7 @@ export const WhiteboardCanvas: React.FC = () => {
         </button>
 
         <button
+          disabled={following}
           onClick={() => setZoom((prev) => prev * 1.15)}
           title="Zoom in"
           className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition"
@@ -1028,6 +1208,7 @@ export const WhiteboardCanvas: React.FC = () => {
         <div className="h-3.5 w-[1px] bg-slate-800 mx-0.5" />
 
         <button
+          disabled={following}
           onClick={() => resetView()}
           title="Reset View"
           className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition"

@@ -39,6 +39,19 @@ const PersistedRoomSchema = z.object({
   userRedoStacks: z.record(z.array(z.string().uuid())),
   undoSnapshots: z.record(SnapshotValueSchema),
   redoSnapshots: z.record(SnapshotValueSchema),
+  versions: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+        ts: z.number().int().positive(),
+        createdBy: z.string().uuid().nullable(),
+        auto: z.boolean(),
+        objectCount: z.number().int().nonnegative(),
+        objects: z.record(WhiteboardObjectSchema),
+      }),
+    )
+    .optional(),
   assets: z
     .record(
       z.object({

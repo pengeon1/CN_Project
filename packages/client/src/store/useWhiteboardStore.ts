@@ -37,10 +37,15 @@ import {
   type RoomStatePayload,
   type SequencedOperation,
   IMAGE_CHUNK_BYTES,
+  MAX_VERSION_NAME_LENGTH,
+  PRESENTATION_STALE_MS,
   type ImageAddPayload,
   type ImageChunkPayload,
   type ImageObject,
   type ObjectChanges,
+  type PresentationPayload,
+  type VersionListPayload,
+  type VersionMeta,
   type ObjectDeletePayload,
   type ObjectUpdatePayload,
   type ShapeAddPayload,
@@ -58,7 +63,16 @@ import {
 import type { ConnectionStatus, ConnectOptions } from '../types/ipc.js';
 
 export type CanvasTool =
-  'select' | 'pen' | 'eraser' | 'rectangle' | 'ellipse' | 'line' | 'arrow' | 'text' | 'sticky_note';
+  | 'select'
+  | 'pen'
+  | 'eraser'
+  | 'laser'
+  | 'rectangle'
+  | 'ellipse'
+  | 'line'
+  | 'arrow'
+  | 'text'
+  | 'sticky_note';
 
 export interface ToolProperties {
   color: string;
@@ -108,6 +122,10 @@ export interface WhiteboardState {
   objects: Record<string, WhiteboardObject>;
   liveLocalStroke: StrokeObject | null;
   selectedIds: string[];
+  /** Current presentation (own, as host, or the host's as a follower). */
+  presentation: PresentationPayload & { receivedAt: number };
+  versions: VersionMeta[];
+  versionsOpen: boolean;
   /** assetId -> data: URL of every image whose bytes have arrived. */
   imageData: Record<string, string>;
   remoteCursors: Record<string, RemoteCursor>;
@@ -175,6 +193,16 @@ export interface WhiteboardState {
   broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
   eraseObjects: (objectIds: string[]) => void;
   setSelectedIds: (ids: string[]) => void;
+  /** Host: start/stop presenting. Followers' views are locked to the host's while active. */
+  setPresenting: (active: boolean) => void;
+  /** Host: broadcast the centre of the current view (call throttled while presenting). */
+  sendPresentationViewport: (x: number, y: number, zoom: number) => void;
+  /** Follower: drop a presentation whose host went silent (lost "stop" message). */
+  endStalePresentation: () => void;
+  setVersionsOpen: (open: boolean) => void;
+  requestVersions: () => void;
+  saveVersion: (name: string) => void;
+  restoreVersion: (versionId: string) => void;
   /** Uploads image bytes in chunks, then adds the image object (optimistically shown). */
   addImage: (image: {
     assetId: string;
@@ -347,6 +375,9 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   objects: {},
   liveLocalStroke: null,
   selectedIds: [],
+  presentation: { active: false, receivedAt: 0 },
+  versions: [],
+  versionsOpen: false,
   imageData: {},
   remoteCursors: {},
   lastAppliedSeq: 0,
@@ -911,6 +942,83 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   setSelectedIds: (ids) => set({ selectedIds: ids }),
 
+  setPresenting: (active) => {
+    const { currentUser, roomInfo } = get();
+    if (!currentUser || !roomInfo || !isHost(currentUser.role)) return;
+    set({ presentation: { active, receivedAt: Date.now() } });
+    if (!active) {
+      getElectronAPI()?.sendMessage(
+        createEnvelope(
+          MessageType.PRESENTATION,
+          { active: false },
+          { user_id: currentUser.id, room: roomInfo.code },
+        ),
+      );
+    }
+    // On start the canvas immediately sends the first viewport (it knows its own size).
+  },
+
+  sendPresentationViewport: (x, y, zoom) => {
+    const { currentUser, roomInfo, presentation } = get();
+    if (!currentUser || !roomInfo || !presentation.active || !isHost(currentUser.role)) return;
+    getElectronAPI()?.sendMessage(
+      createEnvelope(
+        MessageType.PRESENTATION,
+        { active: true, viewport: { x, y, zoom } },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+  },
+
+  endStalePresentation: () => {
+    const { presentation, currentUser } = get();
+    if (!presentation.active || (currentUser && isHost(currentUser.role))) return;
+    if (Date.now() - presentation.receivedAt > PRESENTATION_STALE_MS) {
+      set({ presentation: { active: false, receivedAt: Date.now() } });
+    }
+  },
+
+  setVersionsOpen: (open) => {
+    set({ versionsOpen: open });
+    if (open) get().requestVersions();
+  },
+
+  requestVersions: () => {
+    const { currentUser, roomInfo } = get();
+    if (!currentUser || !roomInfo || !isHost(currentUser.role)) return;
+    getElectronAPI()?.sendMessage(
+      createEnvelope(
+        MessageType.VERSION_LIST,
+        {},
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+  },
+
+  saveVersion: (name) => {
+    const { currentUser, roomInfo } = get();
+    if (!currentUser || !roomInfo || !isHost(currentUser.role) || !name.trim()) return;
+    getElectronAPI()?.sendMessage(
+      createEnvelope(
+        MessageType.VERSION_SAVE,
+        { name: name.trim().slice(0, MAX_VERSION_NAME_LENGTH) },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+  },
+
+  restoreVersion: (versionId) => {
+    const { currentUser, roomInfo } = get();
+    if (!currentUser || !roomInfo || !isHost(currentUser.role)) return;
+    getElectronAPI()?.sendMessage(
+      createEnvelope(
+        MessageType.VERSION_RESTORE,
+        { versionId },
+        { user_id: currentUser.id, room: roomInfo.code },
+      ),
+    );
+  },
+
   addImage: (image) => {
     const { currentUser, roomInfo, objects } = get();
     if (!currentUser || !roomInfo || !canMutateCanvas(currentUser.role)) return false;
@@ -1177,6 +1285,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             : null,
           participants: payload.participants,
           objects: payload.objects || {},
+          presentation: { ...(payload.presentation ?? { active: false }), receivedAt: Date.now() },
           lastAppliedSeq: payload.seq || 0,
           undoStack: [],
           redoStack: [],
@@ -1556,6 +1665,18 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             [payload.object.id]: { ...payload.object, seq: envelope.seq },
           },
         }));
+        break;
+      }
+
+      case MessageType.PRESENTATION: {
+        const payload = envelope.payload as PresentationPayload;
+        set({ presentation: { ...payload, receivedAt: Date.now() } });
+        break;
+      }
+
+      case MessageType.VERSION_LIST: {
+        const payload = envelope.payload as VersionListPayload;
+        set({ versions: payload.versions ?? [] });
         break;
       }
 

@@ -8,11 +8,13 @@ import React, { useState } from 'react';
 import {
   ArrowLeft,
   Download,
+  History,
   Lock,
   LockOpen,
   LogIn,
   MessageSquare,
   Moon,
+  Presentation,
   Search,
   Share2,
   Sun,
@@ -42,6 +44,9 @@ export const TopBar: React.FC = () => {
     requestLoadState,
     exportBoard,
     sendPermissionChange,
+    presentation,
+    setPresenting,
+    setVersionsOpen,
   } = useWhiteboardStore();
 
   const getInitials = (name: string): string => {
@@ -113,6 +118,28 @@ export const TopBar: React.FC = () => {
                     <LockOpen className="h-4 w-4" />
                   )}
                   {roomInfo.locked ? 'Unlock' : 'Lock'}
+                </button>
+                <button
+                  onClick={() => setPresenting(!presentation.active)}
+                  title={
+                    presentation.active ? 'Stop presenting' : 'Present: everyone follows your view'
+                  }
+                  className={`flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium transition ${
+                    presentation.active
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Presentation className="h-4 w-4" />
+                  {presentation.active ? 'Stop' : 'Present'}
+                </button>
+                <button
+                  onClick={() => setVersionsOpen(true)}
+                  title="Version history"
+                  className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+                >
+                  <History className="h-4 w-4" />
+                  History
                 </button>
                 <button
                   onClick={() => void requestSaveState()}

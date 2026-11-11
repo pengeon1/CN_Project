@@ -46,6 +46,10 @@ import {
   ResyncRequestPayloadSchema,
   ResyncResponsePayloadSchema,
   RoomStatePayloadSchema,
+  PresentationPayloadSchema,
+  VersionListPayloadSchema,
+  VersionRestorePayloadSchema,
+  VersionSavePayloadSchema,
   SaveStatePayloadSchema,
 } from './sync.schema.js';
 
@@ -79,6 +83,10 @@ export const PayloadSchemaMap: Record<MessageType, z.ZodTypeAny> = {
   [MessageType.SHAPE_ADD]: ShapeAddPayloadSchema,
   [MessageType.OBJECT_UPDATE]: ObjectUpdatePayloadSchema,
   [MessageType.OBJECT_DELETE]: ObjectDeletePayloadSchema,
+  [MessageType.PRESENTATION]: PresentationPayloadSchema,
+  [MessageType.VERSION_SAVE]: VersionSavePayloadSchema,
+  [MessageType.VERSION_LIST]: VersionListPayloadSchema,
+  [MessageType.VERSION_RESTORE]: VersionRestorePayloadSchema,
   [MessageType.IMAGE_UPLOAD]: ImageChunkPayloadSchema,
   [MessageType.IMAGE_ADD]: ImageAddPayloadSchema,
   [MessageType.IMAGE_REQUEST]: ImageRequestPayloadSchema,

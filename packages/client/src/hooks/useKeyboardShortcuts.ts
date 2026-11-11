@@ -10,6 +10,7 @@
  * - S: Sticky Note tool
  * - L: Arrow tool
  * - N: Line tool
+ * - K: Laser pointer
  *
  * Prevents hotkey interception when focus is inside text inputs, textareas,
  * or content-editable elements, or when modifier keys (Ctrl, Meta, Alt) are held.
@@ -35,6 +36,8 @@ export const TOOL_SHORTCUTS: Record<string, CanvasTool> = {
   S: 'sticky_note',
   l: 'arrow',
   L: 'arrow',
+  k: 'laser',
+  K: 'laser',
   n: 'line',
   N: 'line',
 };

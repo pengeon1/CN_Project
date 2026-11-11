@@ -28,6 +28,10 @@ import {
   type RoomSnapshot,
   type SequencedOperation,
   type ImageChunkPayload,
+  MAX_VERSIONS,
+  type PresentationState,
+  VERSION_AUTO_INTERVAL_MS,
+  type VersionMeta,
   type ImageObject,
   IMAGE_CHUNK_BYTES,
   MAX_IMAGE_BYTES,
@@ -71,7 +75,29 @@ export interface PersistedRoomState {
   redoSnapshots: Record<string, WhiteboardObject | Record<string, WhiteboardObject> | null>;
   /** Image assets by id (base64 bytes), so uploaded pictures survive a server restart. */
   assets?: Record<string, StoredAsset>;
+  /** Saved board versions (full object maps), newest last. */
+  versions?: StoredVersion[];
 }
+
+/** A saved copy of the board that the host can restore. */
+export interface StoredVersion extends VersionMeta {
+  objects: Record<string, WhiteboardObject>;
+}
+
+/** Operation types that change the board (and therefore make the room "dirty" for versioning). */
+const BOARD_MUTATION_TYPES: ReadonlySet<string> = new Set([
+  MessageType.STROKE_BEGIN,
+  MessageType.STROKE_POINTS,
+  MessageType.STROKE_END,
+  MessageType.SHAPE_ADD,
+  MessageType.IMAGE_ADD,
+  MessageType.OBJECT_UPDATE,
+  MessageType.OBJECT_DELETE,
+  MessageType.ERASE,
+  MessageType.CLEAR_CANVAS,
+  MessageType.UNDO,
+  MessageType.REDO,
+]);
 
 /** A fully received image asset. */
 export interface StoredAsset {
@@ -156,6 +182,13 @@ export class Room {
     new Map();
   private redoSnapshots: Map<string, WhiteboardObject | Record<string, WhiteboardObject> | null> =
     new Map();
+  /** Live presentation state; ephemeral (not persisted, not part of the ops log). */
+  public presentation: PresentationState = { active: false };
+  /** Minimum gap between automatic snapshots; a field so tests can shorten it. */
+  public versionIntervalMs: number = VERSION_AUTO_INTERVAL_MS;
+  private versions: StoredVersion[] = [];
+  private lastVersionAt = Date.now();
+  private boardDirty = false;
   private assets: Map<string, StoredAsset> = new Map();
   private pendingUploads: Map<string, PendingUpload> = new Map();
   private assetBytes = 0;
@@ -389,6 +422,10 @@ export class Room {
     payload: unknown,
     ts: number,
   ): number {
+    if (BOARD_MUTATION_TYPES.has(type)) {
+      this.maybeAutoSnapshot(ts);
+      this.boardDirty = true;
+    }
     const seq = this.nextSeq();
     this.markOpProcessed(opId, seq);
     this.recordOperation({ op_id: opId, seq, userId, type, payload, ts });
@@ -430,6 +467,7 @@ export class Room {
         Array.from(this.redoSnapshots, ([id, snapshot]) => [id, this.cloneSnapshot(snapshot)]),
       ),
       assets: Object.fromEntries(this.assets),
+      versions: this.cloneSnapshot(this.versions),
     };
   }
 
@@ -491,6 +529,9 @@ export class Room {
         this.cloneSnapshot(snapshot),
       ]),
     );
+    if (!options.preserveSequence) {
+      this.versions = this.cloneSnapshot(state.versions ?? []);
+    }
     // A manual LOAD keeps assets already held (live clients may still reference them).
     if (!options.preserveSequence) {
       this.assets = new Map();
@@ -658,6 +699,86 @@ export class Room {
     let max = 0;
     for (const obj of this.objects.values()) max = Math.max(max, obj.zIndex);
     return max;
+  }
+
+  // ---- Version history -------------------------------------------------------------------
+
+  /**
+   * Saves a copy of the current board. Automatic snapshots are evicted first when the cap is hit,
+   * so a host's named versions outlive background ones.
+   */
+  public addVersion(name: string, userId: string | null, auto: boolean): VersionMeta {
+    const version: StoredVersion = {
+      id: generateUuid(),
+      name,
+      ts: Date.now(),
+      createdBy: userId,
+      auto,
+      objectCount: this.objects.size,
+      objects: this.snapshotObjectMap(),
+    };
+    this.versions.push(version);
+    while (this.versions.length > MAX_VERSIONS) {
+      const evict = this.versions.findIndex((v) => v.auto);
+      this.versions.splice(evict === -1 ? 0 : evict, 1);
+    }
+    this.lastVersionAt = version.ts;
+    this.boardDirty = false;
+    this.notifyChanged();
+    return this.toMeta(version);
+  }
+
+  /**
+   * Takes an automatic snapshot if the board changed and the interval elapsed. Called lazily from
+   * the first board edit after the interval (no timers), so it captures the state just before
+   * that edit and idle rooms cost nothing.
+   */
+  public maybeAutoSnapshot(now: number = Date.now()): VersionMeta | null {
+    if (!this.boardDirty || now - this.lastVersionAt < this.versionIntervalMs) return null;
+    return this.addVersion(`Auto-save ${new Date(now).toLocaleTimeString()}`, null, true);
+  }
+
+  private toMeta(v: StoredVersion): VersionMeta {
+    return {
+      id: v.id,
+      name: v.name,
+      ts: v.ts,
+      createdBy: v.createdBy,
+      auto: v.auto,
+      objectCount: v.objectCount,
+    };
+  }
+
+  /** Version listing, newest first, without the (large) object data. */
+  public listVersions(): VersionMeta[] {
+    return this.versions.map((v) => this.toMeta(v)).reverse();
+  }
+
+  /**
+   * Replaces the whole board with a saved version. The current board is saved first (as an
+   * automatic version) so a restore can itself be reverted. Per-user undo history is cleared
+   * because its targets no longer exist, and the ops log is reset so lagging clients take a full
+   * snapshot instead of replaying across the jump.
+   *
+   * @returns The restored version's metadata, or null if the id is unknown.
+   */
+  public restoreVersion(versionId: string): VersionMeta | null {
+    const version = this.versions.find((v) => v.id === versionId);
+    if (!version) return null;
+
+    this.addVersion(`Before restoring "${version.name}"`, null, true);
+    this.objects = new Map(
+      Object.entries(version.objects).map(([id, o]) => [id, this.cloneSnapshot(o)]),
+    );
+    this.userUndoStacks.clear();
+    this.userRedoStacks.clear();
+    this.undoSnapshots.clear();
+    this.redoSnapshots.clear();
+    this.operationsLog = [];
+    this.baseSeq = this.seq + 1;
+    this.boardDirty = true;
+    this.notifyChanged();
+    return this.toMeta(version);
   }
 
   /**
@@ -1293,6 +1414,17 @@ export class Room {
     if (session && entry.session !== session) return null;
 
     this.dropPendingUploads(userId);
+    if (this.presentation.active && userId === this.hostUserId) {
+      // The presenter left: end the presentation so nobody stays locked to a stale view.
+      this.presentation = { active: false };
+      this.broadcast(
+        createEnvelope(MessageType.PRESENTATION, this.presentation, {
+          room: this.code,
+          user_id: userId,
+        }),
+        userId,
+      );
+    }
     this.participants.delete(userId);
     this.disconnectedParticipants.set(userId, entry.participant);
     entry.session.roomCode = null;
@@ -1462,6 +1594,7 @@ export class Room {
       chatHistory: this.getChatHistory(),
       locked: this.locked,
       allowNameChanges: this.allowNameChanges,
+      presentation: this.presentation,
       createdAt: this.createdAt,
     };
   }

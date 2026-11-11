@@ -102,6 +102,25 @@ export const MAX_OPS_LOG_SIZE = 1000;
 export const COMPACT_RETAIN_OPS = 500;
 
 /**
+ * Most named/automatic board versions a room keeps (oldest automatic ones are evicted first).
+ */
+export const MAX_VERSIONS = 20;
+
+/**
+ * Minimum time between automatic version snapshots, and only taken when the board changed.
+ */
+export const VERSION_AUTO_INTERVAL_MS = 5 * 60 * 1000;
+
+export const MAX_VERSION_NAME_LENGTH = 60;
+
+/**
+ * Presentation viewport re-send interval while presenting, and how long a follower waits
+ * without an update before concluding the presentation ended (covers a lost "stop" message).
+ */
+export const PRESENTATION_HEARTBEAT_MS = 2000;
+export const PRESENTATION_STALE_MS = 8000;
+
+/**
  * Largest accepted image after client-side downscaling/re-encoding (decoded bytes).
  * Clients shrink to fit; the server enforces it again because it never trusts the client.
  */

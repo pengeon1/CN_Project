@@ -607,6 +607,41 @@ Server-side validation: each chunk is schema-checked (base64, size, index range)
 
 **Export** is client-side only (no protocol traffic): _Export > PNG_ and _PDF_ render the whole board, cropped to its content, using the same renderers as the live canvas. The PDF is a one-page document embedding a JPEG of that render.
 
+#### Presentation mode: `PRESENTATION` (Phase 14)
+
+Host-only, **unsequenced and latest-wins** (a viewport is meaningless once superseded, so it never enters the ops log or consumes a `seq`).
+
+```json
+{
+  "type": "PRESENTATION",
+  "seq": 0,
+  "payload": { "active": true, "viewport": { "x": 120, "y": -40, "zoom": 1.5 } }
+}
+```
+
+- `viewport.x/y` is the **world point at the centre of the host's view**, not pan offsets, so followers with different window sizes keep the same content centred. Followers' pan/zoom are locked while `active`; they can still edit and chat.
+- The host sends a viewport on every pan/zoom (rate-limited to ~20/s, trailing edge) plus a **heartbeat every 2 s**. The server stores the latest state and includes it as `presentation` in `ROOM_STATE`, so late joiners and reconnecting clients lock on immediately.
+- Because `{ "active": false }` is unsequenced it could be lost across a reconnect, so a follower treats **8 s without an update** as "presentation ended". The server also ends it (broadcasting `active: false`) when the presenting host disconnects.
+- Non-host senders receive `ERROR` (`PERMISSION_DENIED`).
+
+#### Laser pointer (Phase 14)
+
+No new message: the laser tool reuses the ephemeral, throttled `CURSOR_MOVE` with `activeTool: "laser"`. Receivers draw a fading ~0.9 s glowing trail in the sender's colour instead of an arrow. Because it is presence data, read-only viewers may use it.
+
+#### Version history: `VERSION_SAVE`, `VERSION_LIST`, `VERSION_RESTORE` (Phase 14)
+
+Host-only. The server keeps up to **20** full copies of the board (object maps) per room, persisted with the room file.
+
+| Message           | Direction                                       | Payload                                                                        | Effect                                           |
+| ----------------- | ----------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `VERSION_SAVE`    | host -> server                                  | `{ "name": "Before workshop" }`                                                | Stores a named copy; replies with `VERSION_LIST` |
+| `VERSION_LIST`    | host -> server (request, `{}`) / server -> host | `{ "versions": [{ "id", "name", "ts", "createdBy", "auto", "objectCount" }] }` | Newest first, no object data                     |
+| `VERSION_RESTORE` | host -> server                                  | `{ "versionId": "<uuid>" }`                                                    | Replaces the board, then broadcasts `ROOM_STATE` |
+
+- **Automatic snapshots** are taken lazily: the first board edit after 5 minutes, and only if the board changed since the last snapshot (no timers; idle rooms cost nothing). When the cap is reached, automatic versions are evicted before named ones.
+- **Restore semantics.** The current board is first saved as an automatic "Before restoring ..." version, so a restore can be reverted. The restored board replaces `objects`; every user's undo/redo history is cleared (its targets no longer exist); the ops log is reset (`baseSeq = seq + 1`) so lagging clients get a full snapshot rather than replaying across the jump; then a `ROOM_STATE` snapshot is broadcast to all participants and a system chat message records who restored what. This is the same convergence mechanism as the host's `LOAD_STATE`.
+- Unknown ids give `ERROR` `VERSION_NOT_FOUND`; non-hosts get `PERMISSION_DENIED`.
+
 #### `OBJECT_DELETE` / `ERASE` (Client -> Server -> Broadcast)
 
 `OBJECT_DELETE` removes one object (`{ "op_id", "id" }`, used by Delete key / selection delete); `ERASE` removes several by ID (eraser tool). Both are undoable.

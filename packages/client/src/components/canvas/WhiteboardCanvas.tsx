@@ -656,15 +656,26 @@ export const WhiteboardCanvas: React.FC = () => {
       ? buildShape(drag.tool, drag.sx, drag.sy, def.w, def.h)
       : buildShape(drag.tool, drag.sx, drag.sy, dx, dy);
 
-    if (drag.tool === 'text' || drag.tool === 'sticky_note') {
+    if (drag.tool === 'sticky_note') {
+      const id = addShape({ ...shape, text: '' });
+      if (id) {
+        setSelectedIds([id]);
+        editorClosedRef.current = false;
+        setEditorText('');
+        setEditor({
+          id,
+          base: { ...shape, id, text: '' },
+        });
+      }
+      return;
+    }
+
+    if (drag.tool === 'text') {
       editorClosedRef.current = false;
       setEditorText('');
       setEditor({
         id: null,
-        base:
-          tiny || drag.tool === 'sticky_note'
-            ? shape
-            : { ...shape, height: Math.max(shape.height, 40) },
+        base: tiny ? shape : { ...shape, height: Math.max(shape.height, 40) },
       });
       return;
     }
@@ -848,7 +859,7 @@ export const WhiteboardCanvas: React.FC = () => {
         closeEditor(true);
       }
       const { x, y } = screenToWorld(e.clientX, e.clientY);
-      if (activeTool === 'text') {
+      if (activeTool === 'text' || activeTool === 'sticky_note') {
         const hit = pickTopmost(objects, x, y, 8 / zoom);
         if (
           hit &&
@@ -1165,7 +1176,7 @@ export const WhiteboardCanvas: React.FC = () => {
         <textarea
           ref={textareaRef}
           value={editorText}
-          placeholder={editor.base.shapeType === 'text' ? 'Type text...' : 'Note text...'}
+          placeholder={editor.base.shapeType === 'text' ? 'Type text...' : 'Type note...'}
           onChange={(e) => setEditorText(e.target.value)}
           onBlur={() => closeEditor(true)}
           onPointerDown={(e) => e.stopPropagation()}
@@ -1187,10 +1198,17 @@ export const WhiteboardCanvas: React.FC = () => {
           }}
           className="absolute z-30 resize-none overflow-hidden rounded border-2 border-blue-500 p-1.5 outline-none shadow-lg"
           style={{
-            left: (editorBounds.x + panX) * zoom,
-            top: (editorBounds.y + panY) * zoom,
-            width: Math.max(editorBounds.w * zoom, 120),
-            height: Math.max(editorBounds.h * zoom, 38),
+            left:
+              (editorBounds.x + panX) * zoom + (editor.base.shapeType === 'sticky_note' ? 8 : 0),
+            top: (editorBounds.y + panY) * zoom + (editor.base.shapeType === 'sticky_note' ? 8 : 0),
+            width: Math.max(
+              (editorBounds.w - (editor.base.shapeType === 'sticky_note' ? 16 : 0)) * zoom,
+              120,
+            ),
+            height: Math.max(
+              (editorBounds.h - (editor.base.shapeType === 'sticky_note' ? 16 : 0)) * zoom,
+              38,
+            ),
             font: fontOf({ ...editor.base, fontSize: (editor.base.fontSize ?? 16) * zoom }),
             textAlign: editor.base.align ?? 'left',
             color:

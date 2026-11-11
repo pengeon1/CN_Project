@@ -1409,5 +1409,16 @@ describe('Client UI & Store Suite', () => {
       store.setLoadModalOpen(false);
       expect(useWhiteboardStore.getState().loadModalOpen).toBe(false);
     });
+
+    it('toggles keyboard shortcuts dialog state', () => {
+      const store = useWhiteboardStore.getState();
+      expect(store.shortcutsModalOpen).toBe(false);
+
+      store.setShortcutsModalOpen(true);
+      expect(useWhiteboardStore.getState().shortcutsModalOpen).toBe(true);
+
+      store.setShortcutsModalOpen(false);
+      expect(useWhiteboardStore.getState().shortcutsModalOpen).toBe(false);
+    });
   });
 });

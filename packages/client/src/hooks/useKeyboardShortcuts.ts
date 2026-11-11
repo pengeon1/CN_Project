@@ -76,6 +76,8 @@ export function useKeyboardShortcuts(): void {
     zoomIn,
     zoomOut,
     resetView,
+    shortcutsModalOpen,
+    setShortcutsModalOpen,
   } = useWhiteboardStore();
 
   useEffect(() => {
@@ -87,7 +89,14 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
-      // 2. Handle Ctrl/Cmd shortcuts
+      // 2. Open shortcuts modal on '?'
+      if (e.key === '?') {
+        e.preventDefault();
+        setShortcutsModalOpen(!shortcutsModalOpen);
+        return;
+      }
+
+      // 3. Handle Ctrl/Cmd shortcuts
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const key = e.key.toLowerCase();
         if (key === 'f') {
@@ -148,5 +157,15 @@ export function useKeyboardShortcuts(): void {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [redoLastAction, resetView, setActiveTool, setSearchOpen, undoLastAction, zoomIn, zoomOut]);
+  }, [
+    redoLastAction,
+    resetView,
+    setActiveTool,
+    setSearchOpen,
+    setShortcutsModalOpen,
+    shortcutsModalOpen,
+    undoLastAction,
+    zoomIn,
+    zoomOut,
+  ]);
 }

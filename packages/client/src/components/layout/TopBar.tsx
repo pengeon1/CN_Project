@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   Download,
   History,
+  Keyboard,
   Lock,
   LockOpen,
   LogIn,
@@ -49,6 +50,7 @@ export const TopBar: React.FC = () => {
     searchOpen,
     setSearchOpen,
     setLoadModalOpen,
+    setShortcutsModalOpen,
   } = useWhiteboardStore();
 
   const getInitials = (name: string): string => {
@@ -222,6 +224,15 @@ export const TopBar: React.FC = () => {
           }`}
         >
           <Search className="h-4 w-4" />
+        </button>
+
+        {/* Keyboard Shortcuts Reference */}
+        <button
+          onClick={() => setShortcutsModalOpen(true)}
+          title="Keyboard Shortcuts (?)"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition"
+        >
+          <Keyboard className="h-4 w-4" />
         </button>
 
         {/* Theme Toggle */}

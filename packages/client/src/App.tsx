@@ -21,6 +21,7 @@ import { VersionHistoryDialog } from './components/dialogs/VersionHistoryDialog.
 import { ProfileSettingsDialog } from './components/dialogs/ProfileSettingsDialog.js';
 import { SearchDialog } from './components/dialogs/SearchDialog.js';
 import { LoadSaveDialog } from './components/dialogs/LoadSaveDialog.js';
+import { KeyboardShortcutsDialog } from './components/dialogs/KeyboardShortcutsDialog.js';
 
 export const App: React.FC = () => {
   useKeyboardShortcuts();
@@ -98,6 +99,7 @@ export const App: React.FC = () => {
       <VersionHistoryDialog />
       <SearchDialog />
       <LoadSaveDialog />
+      <KeyboardShortcutsDialog />
     </div>
   );
 };

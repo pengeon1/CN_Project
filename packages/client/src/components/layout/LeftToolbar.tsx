@@ -59,6 +59,7 @@ export const LeftToolbar: React.FC = () => {
     setSearchOpen,
     setLoadModalOpen,
     setVersionsOpen,
+    setShortcutsModalOpen,
   } = useWhiteboardStore();
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -216,28 +217,21 @@ export const LeftToolbar: React.FC = () => {
 
             <div className="my-1 h-[1px] bg-slate-800" />
 
-            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-              <Keyboard className="h-3 w-3 text-slate-400" />
-              <span>Key Shortcuts</span>
-            </div>
-            <div className="px-2.5 py-1 text-[11px] text-slate-400 space-y-0.5">
-              <div className="flex justify-between">
-                <span>Pen / Eraser</span>
-                <span className="font-mono text-slate-300">P / E</span>
+            <button
+              onClick={() => {
+                setShortcutsModalOpen(true);
+                setMoreMenuOpen(false);
+              }}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+            >
+              <div className="flex items-center gap-2">
+                <Keyboard className="h-4 w-4 text-cyan-400" />
+                <span>All Shortcuts</span>
               </div>
-              <div className="flex justify-between">
-                <span>Select / Pan</span>
-                <span className="font-mono text-slate-300">V / Space</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Shapes / Text</span>
-                <span className="font-mono text-slate-300">R, O, T, S</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Connector / Line</span>
-                <span className="font-mono text-slate-300">X, L, N</span>
-              </div>
-            </div>
+              <kbd className="rounded border border-slate-700 bg-slate-800 px-1 text-[10px] text-slate-400 font-mono">
+                ?
+              </kbd>
+            </button>
           </div>
         )}
       </div>

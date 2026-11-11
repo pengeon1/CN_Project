@@ -157,6 +157,7 @@ export interface WhiteboardState {
   connectModalOpen: boolean;
   profileSettingsOpen: boolean;
   clearModalOpen: boolean;
+  shortcutsModalOpen: boolean;
   isDarkTheme: boolean;
 
   // Actions
@@ -176,6 +177,7 @@ export interface WhiteboardState {
   setConnectModalOpen: (open: boolean) => void;
   setProfileSettingsOpen: (open: boolean) => void;
   setClearModalOpen: (open: boolean) => void;
+  setShortcutsModalOpen: (open: boolean) => void;
   dismissAccessNotice: () => void;
   toggleTheme: () => void;
   sendChatMessage: (text: string) => void;
@@ -419,6 +421,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   connectModalOpen: false,
   profileSettingsOpen: false,
   clearModalOpen: false,
+  shortcutsModalOpen: false,
   isDarkTheme: false,
 
   setConnectionStatus: (status, error = null) => {
@@ -522,6 +525,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   setClearModalOpen: (open) => {
     set({ clearModalOpen: open });
+  },
+
+  setShortcutsModalOpen: (open) => {
+    set({ shortcutsModalOpen: open });
   },
 
   dismissAccessNotice: () => {

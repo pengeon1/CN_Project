@@ -22,6 +22,7 @@
 
 import * as net from 'node:net';
 import {
+  APP_VERSION,
   createEnvelope,
   encodeFrame,
   FrameDecoder,
@@ -254,7 +255,7 @@ export class MainTcpClient {
       this.lastReceivedAt = Date.now();
       this.write(
         createEnvelope(MessageType.HELLO, {
-          clientVersion: '0.1.0',
+          clientVersion: APP_VERSION,
           suggestedUsername: options.username,
           sessionToken: this.sessionId ?? undefined,
         }),

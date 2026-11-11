@@ -7,11 +7,17 @@
  */
 import { spawn } from 'node:child_process';
 import * as dgram from 'node:dgram';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import * as net from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const rootPkg = JSON.parse(
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../package.json'), 'utf8'),
+);
+const APP_VERSION = typeof rootPkg.version === 'string' ? rootPkg.version : '1.0.0';
 
 const exe = process.argv[2];
 if (!exe) {
@@ -85,7 +91,7 @@ const body = Buffer.from(
     ts: Date.now(),
     room: '',
     user_id: '',
-    payload: { clientVersion: '0.1.0', suggestedUsername: 'smoke' },
+    payload: { clientVersion: APP_VERSION, suggestedUsername: 'smoke' },
   }),
 );
 const header = Buffer.alloc(4);

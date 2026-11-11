@@ -47,6 +47,8 @@ export const TopBar: React.FC = () => {
     presentation,
     setPresenting,
     setVersionsOpen,
+    searchOpen,
+    setSearchOpen,
   } = useWhiteboardStore();
 
   const getInitials = (name: string): string => {
@@ -219,8 +221,13 @@ export const TopBar: React.FC = () => {
 
         {/* Find on board button */}
         <button
-          title="Search"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition"
+          onClick={() => setSearchOpen(!searchOpen)}
+          title="Search on board (Ctrl+F)"
+          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+            searchOpen
+              ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/80 dark:text-blue-400'
+              : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+          }`}
         >
           <Search className="h-4 w-4" />
         </button>

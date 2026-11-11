@@ -126,6 +126,7 @@ export interface WhiteboardState {
   presentation: PresentationPayload & { receivedAt: number };
   versions: VersionMeta[];
   versionsOpen: boolean;
+  searchOpen: boolean;
   /** assetId -> data: URL of every image whose bytes have arrived. */
   imageData: Record<string, string>;
   remoteCursors: Record<string, RemoteCursor>;
@@ -200,6 +201,8 @@ export interface WhiteboardState {
   /** Follower: drop a presentation whose host went silent (lost "stop" message). */
   endStalePresentation: () => void;
   setVersionsOpen: (open: boolean) => void;
+  setSearchOpen: (open: boolean) => void;
+  focusObject: (id: string) => void;
   requestVersions: () => void;
   saveVersion: (name: string) => void;
   restoreVersion: (versionId: string) => void;
@@ -378,6 +381,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   presentation: { active: false, receivedAt: 0 },
   versions: [],
   versionsOpen: false,
+  searchOpen: false,
   imageData: {},
   remoteCursors: {},
   lastAppliedSeq: 0,
@@ -981,6 +985,51 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   setVersionsOpen: (open) => {
     set({ versionsOpen: open });
     if (open) get().requestVersions();
+  },
+
+  setSearchOpen: (open) => {
+    set({ searchOpen: open });
+  },
+
+  focusObject: (id: string) => {
+    const { objects, zoom } = get();
+    const obj = objects[id];
+    if (!obj) return;
+
+    let centerX = 0;
+    let centerY = 0;
+
+    if (obj.type === 'stroke') {
+      if (!obj.points.length) return;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of obj.points) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      centerX = (minX + maxX) / 2;
+      centerY = (minY + maxY) / 2;
+    } else {
+      centerX = obj.x + (obj.width ?? 0) / 2;
+      centerY = obj.y + (obj.height ?? 0) / 2;
+    }
+
+    const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const viewportH = typeof window !== 'undefined' ? window.innerHeight - 56 : 800;
+    const nextPanX = viewportW / (2 * zoom) - centerX;
+    const nextPanY = viewportH / (2 * zoom) - centerY;
+
+    set({
+      panX: Math.round(nextPanX),
+      panY: Math.round(nextPanY),
+      selectedIds: [id],
+      activeTool: 'select',
+      searchOpen: false,
+    });
   },
 
   requestVersions: () => {

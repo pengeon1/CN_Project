@@ -64,7 +64,7 @@ export function isEditableElement(target: EventTarget | null): boolean {
 }
 
 export function useKeyboardShortcuts(): void {
-  const { setActiveTool, undoLastAction, redoLastAction } = useWhiteboardStore();
+  const { setActiveTool, undoLastAction, redoLastAction, setSearchOpen } = useWhiteboardStore();
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -75,9 +75,14 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
-      // 2. Handle undo/redo before normal tool mapping.
+      // 2. Handle Ctrl/Cmd shortcuts
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const key = e.key.toLowerCase();
+        if (key === 'f') {
+          e.preventDefault();
+          setSearchOpen(true);
+          return;
+        }
         if (key === 'z') {
           if (e.shiftKey) {
             redoLastAction();

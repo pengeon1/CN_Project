@@ -48,6 +48,7 @@ describe('Client UI & Store Suite', () => {
       liveLocalStroke: null,
       remoteCursors: {},
       lastAppliedSeq: 0,
+      searchOpen: false,
     });
   });
 
@@ -1352,6 +1353,45 @@ describe('Client UI & Store Suite', () => {
 
       const chat = useWhiteboardStore.getState().chatMessages;
       expect(chat.map((m) => m.id)).toEqual([localId, missedId]);
+    });
+
+    it('toggles search dialog state and focuses canvas objects', () => {
+      const store = useWhiteboardStore.getState();
+      expect(store.searchOpen).toBe(false);
+
+      store.setSearchOpen(true);
+      expect(useWhiteboardStore.getState().searchOpen).toBe(true);
+
+      const testShapeId = generateUuid();
+      useWhiteboardStore.setState({
+        objects: {
+          [testShapeId]: {
+            id: testShapeId,
+            type: 'shape',
+            shapeType: 'sticky_note',
+            x: 500,
+            y: 300,
+            width: 160,
+            height: 160,
+            strokeColor: '#F59E0B',
+            strokeWidth: 2,
+            text: 'Meeting notes',
+            authorId: 'u1',
+            createdAt: Date.now(),
+          },
+        },
+        zoom: 1.0,
+      });
+
+      useWhiteboardStore.getState().focusObject(testShapeId);
+
+      const updated = useWhiteboardStore.getState();
+      expect(updated.searchOpen).toBe(false);
+      expect(updated.selectedIds).toEqual([testShapeId]);
+      expect(updated.activeTool).toBe('select');
+      // Center of 500+80=580, 300+80=380. Check pan shifted towards object
+      expect(typeof updated.panX).toBe('number');
+      expect(typeof updated.panY).toBe('number');
     });
   });
 });

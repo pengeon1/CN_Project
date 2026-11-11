@@ -19,6 +19,7 @@ import { ClearCanvasDialog } from './components/dialogs/ClearCanvasDialog.js';
 import { AccessNoticeDialog } from './components/dialogs/AccessNoticeDialog.js';
 import { VersionHistoryDialog } from './components/dialogs/VersionHistoryDialog.js';
 import { ProfileSettingsDialog } from './components/dialogs/ProfileSettingsDialog.js';
+import { SearchDialog } from './components/dialogs/SearchDialog.js';
 
 export const App: React.FC = () => {
   useKeyboardShortcuts();
@@ -94,6 +95,7 @@ export const App: React.FC = () => {
       <AccessNoticeDialog />
       <ProfileSettingsDialog />
       <VersionHistoryDialog />
+      <SearchDialog />
     </div>
   );
 };

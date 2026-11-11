@@ -11,7 +11,11 @@ import {
   type StrokeObject,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
-import { applySequencedOpToObjects, useWhiteboardStore } from '../src/store/useWhiteboardStore.js';
+import {
+  applySequencedOpToObjects,
+  consumeRemoteLaserPoints,
+  useWhiteboardStore,
+} from '../src/store/useWhiteboardStore.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 import type { ElectronWhiteboardAPI } from '../src/types/ipc.js';
 
@@ -1419,6 +1423,50 @@ describe('Client UI & Store Suite', () => {
 
       store.setShortcutsModalOpen(false);
       expect(useWhiteboardStore.getState().shortcutsModalOpen).toBe(false);
+    });
+
+    it('buffers batched remote laser vertices without dropping intermediate points', () => {
+      const peerId = generateUuid();
+      useWhiteboardStore.setState({
+        participants: [
+          {
+            id: peerId,
+            username: 'LaserPeer',
+            role: Role.EDITOR,
+            color: '#EF4444',
+            joinedAt: Date.now(),
+          },
+        ],
+      });
+
+      useWhiteboardStore.getState().handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.CURSOR_MOVE,
+          {
+            x: 130,
+            y: 230,
+            activeTool: 'laser',
+            points: [
+              { x: 100, y: 200 },
+              { x: 110, y: 210 },
+              { x: 120, y: 220 },
+              { x: 130, y: 230 },
+            ],
+          },
+          { user_id: peerId, room: 'LASER1' },
+        ),
+      );
+
+      const consumed = consumeRemoteLaserPoints(peerId);
+      expect(consumed).toHaveLength(4);
+      expect(consumed.map((p) => [p.x, p.y])).toEqual([
+        [100, 200],
+        [110, 210],
+        [120, 220],
+        [130, 230],
+      ]);
+      // Queue drains completely on consumption
+      expect(consumeRemoteLaserPoints(peerId)).toHaveLength(0);
     });
   });
 });

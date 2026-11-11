@@ -190,4 +190,13 @@ export const CursorMovePayloadSchema = z.object({
   y: z.number().finite(),
   activeTool: z.string().max(32).optional(),
   pressure: z.number().min(0).max(1).optional(),
+  points: z
+    .array(
+      z.object({
+        x: z.number().finite(),
+        y: z.number().finite(),
+      }),
+    )
+    .max(64)
+    .optional(),
 });

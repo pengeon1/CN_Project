@@ -306,6 +306,8 @@ export interface CursorMovePayload {
   y: number;
   activeTool?: string;
   pressure?: number;
+  /** Optional batched intermediate points for silky-smooth laser pointer trails across LAN. */
+  points?: Array<{ x: number; y: number }>;
 }
 
 export interface ChatMessagePayload {

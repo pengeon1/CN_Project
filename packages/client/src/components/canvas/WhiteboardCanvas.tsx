@@ -20,7 +20,7 @@ import {
   type StrokeObject,
   type WhiteboardObject,
 } from '@cn-whiteboard/common';
-import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import { consumeRemoteLaserPoints, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { isEditableElement } from '../../hooks/useKeyboardShortcuts.js';
 import { getImageElement, renderImage } from './images.js';
 import { insertImageFile } from './imageInsert.js';
@@ -105,7 +105,7 @@ function addLaserPoint(
   if (!last || last.x !== x || last.y !== y) trail.pts.push({ x, y, t });
 }
 
-/** Draws a fading glowing trail ending in a bright dot (screen space). */
+/** Draws a fading glowing trail ending in a bright dot (screen space) using quadratic spline interpolation. */
 function renderLaserTrail(
   ctx: CanvasRenderingContext2D,
   trail: LaserTrail,
@@ -114,32 +114,68 @@ function renderLaserTrail(
   panY: number,
   now: number,
 ): void {
+  const pts = trail.pts;
+  if (pts.length === 0) return;
+
+  const toScreen = (pt: { x: number; y: number }) => ({
+    x: (pt.x + panX) * zoom,
+    y: (pt.y + panY) * zoom,
+  });
+
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = trail.color;
   ctx.shadowColor = trail.color;
-  ctx.shadowBlur = 10;
-  for (let i = 1; i < trail.pts.length; i++) {
-    const a = trail.pts[i - 1]!;
-    const b = trail.pts[i]!;
-    ctx.globalAlpha = Math.max(0, 1 - (now - b.t) / LASER_TTL_MS);
-    ctx.lineWidth = 4;
+  ctx.shadowBlur = 12;
+
+  if (pts.length === 2) {
+    const a = toScreen(pts[0]!);
+    const b = toScreen(pts[1]!);
+    const alpha = Math.max(0, 1 - (now - pts[1]!.t) / LASER_TTL_MS);
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = 2 + 3 * alpha;
     ctx.beginPath();
-    ctx.moveTo((a.x + panX) * zoom, (a.y + panY) * zoom);
-    ctx.lineTo((b.x + panX) * zoom, (b.y + panY) * zoom);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
     ctx.stroke();
+  } else if (pts.length >= 3) {
+    // Midpoint quadratic Bézier spline ensures smooth curves even when network updates arrive sparsely
+    for (let i = 1; i < pts.length - 1; i++) {
+      const pPrev = pts[i - 1]!;
+      const pCurr = pts[i]!;
+      const pNext = pts[i + 1]!;
+
+      const sWorld = i === 1 ? pPrev : { x: (pPrev.x + pCurr.x) / 2, y: (pPrev.y + pCurr.y) / 2 };
+      const eWorld =
+        i === pts.length - 2 ? pNext : { x: (pCurr.x + pNext.x) / 2, y: (pCurr.y + pNext.y) / 2 };
+
+      const s = toScreen(sWorld);
+      const ctrl = toScreen(pCurr);
+      const e = toScreen(eWorld);
+
+      const alpha = Math.max(0, 1 - (now - pCurr.t) / LASER_TTL_MS);
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 2 + 3.5 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.quadraticCurveTo(ctrl.x, ctrl.y, e.x, e.y);
+      ctx.stroke();
+    }
   }
-  const head = trail.pts[trail.pts.length - 1];
+
+  const head = pts[pts.length - 1];
   if (head) {
+    const hs = toScreen(head);
     ctx.globalAlpha = Math.max(0, 1 - (now - head.t) / LASER_TTL_MS);
     ctx.fillStyle = trail.color;
     ctx.beginPath();
-    ctx.arc((head.x + panX) * zoom, (head.y + panY) * zoom, 6, 0, Math.PI * 2);
+    ctx.arc(hs.x, hs.y, 6, 0, Math.PI * 2);
     ctx.fill();
+    ctx.shadowBlur = 0;
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.arc((head.x + panX) * zoom, (head.y + panY) * zoom, 2.5, 0, Math.PI * 2);
+    ctx.arc(hs.x, hs.y, 2.5, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -326,6 +362,9 @@ export const WhiteboardCanvas: React.FC = () => {
   const [imageTick, setImageTick] = useState(0);
   const laserTrails = useRef<Map<string, LaserTrail>>(new Map());
   const laserTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingLaserPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const laserFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRemoteLaserCoordsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const lastPresentSend = useRef(0);
 
   // Presentation: the host drives; everyone else has a locked, mirrored view.
@@ -518,9 +557,23 @@ export const WhiteboardCanvas: React.FC = () => {
     const nowMs = Date.now();
     for (const cursor of Object.values(remoteCursors)) {
       if (cursor.activeTool === 'laser') {
-        addLaserPoint(laserTrails.current, cursor.userId, cursor.color, cursor.x, cursor.y, nowMs);
+        const queuedPts = consumeRemoteLaserPoints(cursor.userId);
+        if (queuedPts.length > 0) {
+          for (const qp of queuedPts) {
+            addLaserPoint(laserTrails.current, cursor.userId, qp.color, qp.x, qp.y, qp.t);
+          }
+          const lastQp = queuedPts[queuedPts.length - 1]!;
+          lastRemoteLaserCoordsRef.current.set(cursor.userId, { x: lastQp.x, y: lastQp.y });
+        } else {
+          const prev = lastRemoteLaserCoordsRef.current.get(cursor.userId);
+          if (!prev || prev.x !== cursor.x || prev.y !== cursor.y) {
+            addLaserPoint(laserTrails.current, cursor.userId, cursor.color, cursor.x, cursor.y, nowMs);
+            lastRemoteLaserCoordsRef.current.set(cursor.userId, { x: cursor.x, y: cursor.y });
+          }
+        }
         continue; // drawn as a laser below instead of an arrow
       }
+      lastRemoteLaserCoordsRef.current.delete(cursor.userId);
       const sx = (cursor.x + panX) * zoom;
       const sy = (cursor.y + panY) * zoom;
       if (sx >= -50 && sx <= width + 50 && sy >= -50 && sy <= height + 50) {
@@ -528,7 +581,7 @@ export const WhiteboardCanvas: React.FC = () => {
       }
     }
 
-    // Laser pointers (local and remote): fade out, and keep repainting until they are gone
+    // Laser pointers (local and remote): fade out at 60 FPS, and keep repainting until they are gone
     let trailAlive = false;
     for (const [id, trail] of laserTrails.current) {
       trail.pts = trail.pts.filter((p) => nowMs - p.t < LASER_TTL_MS);
@@ -552,7 +605,7 @@ export const WhiteboardCanvas: React.FC = () => {
       laserTimer.current = setTimeout(() => {
         laserTimer.current = null;
         setImageTick((t) => t + 1);
-      }, 33);
+      }, 16);
     }
 
     // 5. Render eraser reticle indicator when eraser tool is active
@@ -605,6 +658,14 @@ export const WhiteboardCanvas: React.FC = () => {
     observer.observe(container);
     return () => observer.disconnect();
   }, [renderCanvas]);
+
+  // Cleanup pending laser timers on unmount
+  useEffect(() => {
+    return () => {
+      if (laserTimer.current) clearTimeout(laserTimer.current);
+      if (laserFlushTimerRef.current) clearTimeout(laserFlushTimerRef.current);
+    };
+  }, []);
 
   /** Builds a not-yet-sent shape from the active tool properties. */
   const buildShape = (tool: ShapeTool, x: number, y: number, w: number, h: number): ShapeObject => {
@@ -997,14 +1058,55 @@ export const WhiteboardCanvas: React.FC = () => {
     }
 
     if (activeTool === 'laser') {
-      addLaserPoint(laserTrails.current, 'local', currentUser?.color ?? '#EF4444', x, y, now);
+      const nativeEvt = e.nativeEvent as PointerEvent & {
+        getCoalescedEvents?: () => PointerEvent[];
+      };
+      const coalesced =
+        typeof nativeEvt.getCoalescedEvents === 'function' ? nativeEvt.getCoalescedEvents() : [];
+      const sampleEvents = coalesced.length > 0 ? coalesced : [e.nativeEvent];
+
+      for (const evt of sampleEvents) {
+        const pt = screenToWorld(evt.clientX, evt.clientY);
+        addLaserPoint(
+          laserTrails.current,
+          'local',
+          currentUser?.color ?? '#EF4444',
+          pt.x,
+          pt.y,
+          now,
+        );
+        const lastPending = pendingLaserPointsRef.current[pendingLaserPointsRef.current.length - 1];
+        if (!lastPending || Math.hypot(pt.x - lastPending.x, pt.y - lastPending.y) >= 0.5) {
+          pendingLaserPointsRef.current.push({ x: pt.x, y: pt.y });
+          if (pendingLaserPointsRef.current.length > 64) {
+            pendingLaserPointsRef.current.shift();
+          }
+        }
+      }
       setImageTick((t) => t + 1);
     }
 
-    // Throttled cursor broadcast
-    if (now - lastCursorSendRef.current >= CURSOR_THROTTLE_MS) {
-      broadcastCursorPosition(x, y, e.pressure);
+    // Throttled cursor broadcast (16ms ~60Hz for laser pointer with full vertex batching)
+    const throttleMs = activeTool === 'laser' ? 16 : CURSOR_THROTTLE_MS;
+    if (now - lastCursorSendRef.current >= throttleMs) {
+      if (laserFlushTimerRef.current) {
+        clearTimeout(laserFlushTimerRef.current);
+        laserFlushTimerRef.current = null;
+      }
+      const batch =
+        activeTool === 'laser' ? pendingLaserPointsRef.current.splice(0, 64) : undefined;
+      broadcastCursorPosition(x, y, e.pressure, batch && batch.length > 0 ? batch : undefined);
       lastCursorSendRef.current = now;
+    } else if (activeTool === 'laser' && !laserFlushTimerRef.current) {
+      laserFlushTimerRef.current = setTimeout(() => {
+        laserFlushTimerRef.current = null;
+        const remaining = pendingLaserPointsRef.current.splice(0, 64);
+        if (remaining.length > 0) {
+          const tail = remaining[remaining.length - 1]!;
+          broadcastCursorPosition(tail.x, tail.y, undefined, remaining);
+          lastCursorSendRef.current = Date.now();
+        }
+      }, 20);
     }
 
     // Select Tool: hit test for author hover attribution

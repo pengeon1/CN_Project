@@ -199,7 +199,12 @@ export interface WhiteboardState {
   updateLocalLivePoint: (point: Point) => void;
   appendDrawingPoints: (points: Point[]) => void;
   finishDrawing: (finalPoint?: Point) => void;
-  broadcastCursorPosition: (x: number, y: number, pressure?: number) => void;
+  broadcastCursorPosition: (
+    x: number,
+    y: number,
+    pressure?: number,
+    points?: Array<{ x: number; y: number }>,
+  ) => void;
   eraseObjects: (objectIds: string[]) => void;
   setSelectedIds: (ids: string[]) => void;
   /** Host: start/stop presenting. Followers' views are locked to the host's while active. */
@@ -255,6 +260,22 @@ function getElectronAPI() {
 const incomingImages = new Map<string, { parts: Array<string | undefined>; got: number }>();
 /** When bytes for an asset were last requested, to avoid duplicate requests. */
 const imageRequestedAt = new Map<string, number>();
+
+/** Incoming remote laser trail vertices queued between React paint frames so no vertices are dropped. */
+const pendingRemoteLaserPoints = new Map<
+  string,
+  Array<{ x: number; y: number; color: string; t: number }>
+>();
+
+/** Drains and returns all buffered remote laser vertices for a given user. */
+export function consumeRemoteLaserPoints(
+  userId: string,
+): Array<{ x: number; y: number; color: string; t: number }> {
+  const pts = pendingRemoteLaserPoints.get(userId);
+  if (!pts || pts.length === 0) return [];
+  pendingRemoteLaserPoints.delete(userId);
+  return pts;
+}
 
 function toChatEntry(message: ChatMessage): ChatEntry {
   return {
@@ -760,6 +781,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     if (api) {
       await api.disconnect();
     }
+    pendingRemoteLaserPoints.clear();
     set({
       connectionStatus: 'disconnected',
       roomPassword: undefined,
@@ -960,22 +982,26 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     }
   },
 
-  broadcastCursorPosition: (x, y, pressure) => {
+  broadcastCursorPosition: (x, y, pressure, points) => {
     const { currentUser, roomInfo, activeTool } = get();
     const api = getElectronAPI();
     if (!currentUser || !roomInfo || !api) return;
 
+    const payload: CursorMovePayload = {
+      x,
+      y,
+      activeTool,
+      pressure,
+    };
+    if (points && points.length > 0) {
+      payload.points = points.slice(0, 64);
+    }
+
     api.sendMessage(
-      createEnvelope(
-        MessageType.CURSOR_MOVE,
-        {
-          x,
-          y,
-          activeTool,
-          pressure,
-        },
-        { user_id: currentUser.id, room: roomInfo.code },
-      ),
+      createEnvelope(MessageType.CURSOR_MOVE, payload, {
+        user_id: currentUser.id,
+        room: roomInfo.code,
+      }),
     );
   },
 
@@ -1378,6 +1404,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
     switch (envelope.type) {
       case MessageType.ROOM_STATE: {
+        pendingRemoteLaserPoints.clear();
         const payload = envelope.payload as RoomStatePayload;
         const currentUserId = envelope.user_id;
         const myParticipant = payload.participants.find((p) => p.id === currentUserId);
@@ -1525,12 +1552,32 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
       case MessageType.CURSOR_MOVE: {
         const payload = envelope.payload as CursorMovePayload;
+        const participant = get().participants.find((p) => p.id === envelope.user_id);
+        const color = participant?.color || '#3B82F6';
+        if (payload.activeTool === 'laser') {
+          const pts =
+            payload.points && payload.points.length > 0
+              ? payload.points
+              : [{ x: payload.x, y: payload.y }];
+          const queue = pendingRemoteLaserPoints.get(envelope.user_id) ?? [];
+          const now = Date.now();
+          const count = pts.length;
+          const spanMs = Math.min(20, count * 2);
+          for (let i = 0; i < count; i++) {
+            const p = pts[i]!;
+            const t = count > 1 ? now - spanMs + (i / (count - 1)) * spanMs : now;
+            queue.push({ x: p.x, y: p.y, color, t });
+          }
+          if (queue.length > 256) {
+            queue.splice(0, queue.length - 256);
+          }
+          pendingRemoteLaserPoints.set(envelope.user_id, queue);
+        }
         set((state) => {
-          const participant = state.participants.find((p) => p.id === envelope.user_id);
           const cursor: RemoteCursor = {
             userId: envelope.user_id,
             username: participant?.username || 'Peer',
-            color: participant?.color || '#3B82F6',
+            color,
             x: payload.x,
             y: payload.y,
             activeTool: payload.activeTool,

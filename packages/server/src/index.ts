@@ -13,6 +13,7 @@ export * from './session.js';
 export * from './room.js';
 export * from './room-persistence.js';
 export * from './room-manager.js';
+export * from './discovery.js';
 export * from './server.js';
 
 const logger = new Logger('Main');
@@ -36,6 +37,7 @@ export async function startServer(configOverride?: Partial<ServerConfig>): Promi
     dataDir: config.dataDir,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     heartbeatTimeoutMs: config.heartbeatTimeoutMs,
+    discoveryPort: config.discoveryPort,
   });
 
   const { port, host } = await server.listen();

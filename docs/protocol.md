@@ -1148,3 +1148,28 @@ The behaviour above is exercised by automated tests, including an end-to-end sui
 - Startup validates persisted files before accepting connections. Invalid JSON or state produces a startup error instead of silently discarding data.
 - Hosts can send `SAVE_STATE` with `{}` to save immediately or `LOAD_STATE` with `{}` to load the latest server-side save. A successful load replaces the active room state and sends a fresh `ROOM_STATE` snapshot to each participant. A missing save returns `ERROR` with code `SAVE_NOT_FOUND`.
 - `SAVE_STATE` replies with `{ "savedAt": 1730644800000, "filename": "ABC234.json" }`; `LOAD_STATE` replies with `{ "loadedAt": 1730644800000, "filename": "ABC234.json" }`. These acknowledgments are unsequenced. The client can separately export its current snapshot as a JSON file using the desktop save dialog.
+
+## 10. LAN Discovery (UDP)
+
+Everything above runs over TCP. The one exception is **server discovery**, which needs a one-to-many "is anyone there?" that TCP cannot do. Discovery is a convenience only: the client dialog always keeps manual IP/port entry, and nothing in a session depends on UDP. It works with the internet disabled, since it uses only the local network.
+
+**Exchange** (UDP/IPv4, default port `45454`, change with `--discovery-port`, disable with `--no-discovery`):
+
+1. The client binds an ephemeral UDP socket, enables broadcast, and sends a **PROBE** to `255.255.255.255`, to the directed broadcast address of every external IPv4 interface (e.g. `192.168.1.255`, computed from address + netmask), and to `127.0.0.1` (a server on the same machine). Several targets are used because many OSes route the limited broadcast out of only one interface.
+2. Every server that receives it answers the **sender directly (unicast)** with an **ANNOUNCE**.
+3. The client collects replies for 1.5 s, de-duplicates by `name:port` (a server reachable on several addresses answers each probe; a real LAN address is preferred over loopback), and shows the list. Picking one fills in the host and port.
+
+```json
+{ "magic": "CN-WHITEBOARD", "v": 1, "type": "PROBE" }
+{ "magic": "CN-WHITEBOARD", "v": 1, "type": "ANNOUNCE", "name": "lab-pc", "port": 4000, "rooms": 2, "appVersion": "0.1.0" }
+```
+
+**Safety properties**
+
+- _No secrets._ An announcement never contains room codes, names or participants, only the server name, TCP port and a room _count_. Knowing a server exists grants nothing: joining still needs the room code and password, and the TCP layer's role checks and rate limits apply unchanged.
+- _Strict parsing._ Datagrams over 512 bytes, non-JSON, wrong `magic`/`v`, or failing the zod schema are silently dropped.
+- _No reflection abuse._ A responder answers at most 5 probes per second per source address, and replies are small and go only to the probing address.
+- _Never fatal._ If the UDP port is taken or binding fails, the server logs a warning and keeps serving over TCP. Two servers on one machine can share the port (`SO_REUSEADDR`); if you need both discoverable by different clients, give them different `--discovery-port` values.
+- _UDP is unreliable by design:_ a lost probe or reply just means the server is missing from that scan; scanning again fixes it.
+
+Firewall note: the host firewall must allow inbound **UDP 45454** (in addition to the TCP port) for discovery to find that server; if it blocks it, typing the IP still works.

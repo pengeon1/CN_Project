@@ -10,6 +10,8 @@ import type {
   Point,
   RoomSnapshot,
   ImageObject,
+  PresentationState,
+  VersionMeta,
   ShapeObject,
   WhiteboardObject,
 } from './whiteboard.js';
@@ -50,6 +52,12 @@ export const MessageType = {
   CLEAR_CANVAS: 'CLEAR_CANVAS',
   UNDO: 'UNDO',
   REDO: 'REDO',
+
+  // Presentation mode and version history (host-driven)
+  PRESENTATION: 'PRESENTATION',
+  VERSION_SAVE: 'VERSION_SAVE',
+  VERSION_LIST: 'VERSION_LIST',
+  VERSION_RESTORE: 'VERSION_RESTORE',
 
   // Ephemeral Presence
   CURSOR_MOVE: 'CURSOR_MOVE',
@@ -237,6 +245,22 @@ export interface ImageChunkPayload {
 export interface ImageAddPayload {
   op_id: string;
   object: ImageObject;
+}
+
+/** Host -> server -> followers. `viewport.x/y` is the world point at the centre of the host's view. */
+export type PresentationPayload = PresentationState;
+
+export interface VersionSavePayload {
+  name: string;
+}
+
+/** Empty (or omitted `versions`) as a request; carries the list as a response. */
+export interface VersionListPayload {
+  versions?: VersionMeta[];
+}
+
+export interface VersionRestorePayload {
+  versionId: string;
 }
 
 export interface ImageRequestPayload {

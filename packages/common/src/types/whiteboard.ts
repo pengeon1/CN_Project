@@ -162,6 +162,27 @@ export interface ChatMessage {
 }
 
 /**
+ * Host-driven presentation: followers mirror the host's viewport while `active`.
+ * `viewport.x/y` is the world coordinate at the centre of the host's view, so differently
+ * sized windows show the same content in the middle.
+ */
+export interface PresentationState {
+  active: boolean;
+  viewport?: { x: number; y: number; zoom: number };
+}
+
+/** Listing entry for a saved board version (the object data stays on the server). */
+export interface VersionMeta {
+  id: string;
+  name: string;
+  ts: number;
+  createdBy: string | null;
+  /** true for automatic snapshots, false for ones the host named. */
+  auto: boolean;
+  objectCount: number;
+}
+
+/**
  * Fully materialized room snapshot sent during late-join sync or room state export.
  */
 export interface RoomSnapshot {
@@ -173,5 +194,6 @@ export interface RoomSnapshot {
   chatHistory: ChatMessage[];
   locked: boolean;
   allowNameChanges?: boolean;
+  presentation?: PresentationState;
   createdAt: number;
 }

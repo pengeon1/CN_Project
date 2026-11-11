@@ -24,11 +24,21 @@ export const ShapeType = {
   ELLIPSE: 'ellipse',
   LINE: 'line',
   ARROW: 'arrow',
+  CONNECTOR: 'connector',
   TEXT: 'text',
   STICKY_NOTE: 'sticky_note',
 } as const;
 
 export type ShapeType = (typeof ShapeType)[keyof typeof ShapeType];
+
+/** Cardinal edge anchor side on a canvas shape/object for smart connector binding. */
+export type AnchorSide = 'top' | 'bottom' | 'left' | 'right';
+
+/** Reference linking one end of a connector to an anchor edge on another object. */
+export interface AnchorRef {
+  objectId: string;
+  side: AnchorSide;
+}
 
 /**
  * Common properties shared across all whiteboard objects on the canvas.
@@ -98,6 +108,8 @@ export interface ShapeObject extends BaseWhiteboardObject {
   align?: 'left' | 'center' | 'right';
   bold?: boolean;
   italic?: boolean;
+  startAnchor?: AnchorRef;
+  endAnchor?: AnchorRef;
 }
 
 /**

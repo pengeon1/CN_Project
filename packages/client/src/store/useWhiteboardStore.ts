@@ -71,6 +71,7 @@ export type CanvasTool =
   | 'ellipse'
   | 'line'
   | 'arrow'
+  | 'connector'
   | 'text'
   | 'sticky_note';
 

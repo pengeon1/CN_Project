@@ -9,6 +9,7 @@
  * - T: Text tool
  * - S: Sticky Note tool
  * - L: Arrow tool
+ * - X / C: Orthogonal Connector tool
  * - N: Line tool
  * - K: Laser pointer
  *
@@ -36,10 +37,10 @@ export const TOOL_SHORTCUTS: Record<string, CanvasTool> = {
   S: 'sticky_note',
   l: 'arrow',
   L: 'arrow',
-  x: 'arrow',
-  X: 'arrow',
-  c: 'arrow',
-  C: 'arrow',
+  x: 'connector',
+  X: 'connector',
+  c: 'connector',
+  C: 'connector',
   k: 'laser',
   K: 'laser',
   n: 'line',

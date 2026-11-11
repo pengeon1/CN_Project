@@ -10,8 +10,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Minus, Plus, Radio, RotateCcw } from 'lucide-react';
 import { getStroke } from 'perfect-freehand';
 import {
+  type AnchorRef,
   CURSOR_THROTTLE_MS,
   isHost,
+  type ObjectChanges,
   PRESENTATION_HEARTBEAT_MS,
   type Point,
   type RemoteCursor,
@@ -19,22 +21,27 @@ import {
   type ShapeObject,
   type StrokeObject,
   type WhiteboardObject,
+  applyObjectChanges,
 } from '@cn-whiteboard/common';
 import { consumeRemoteLaserPoints, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { isEditableElement } from '../../hooks/useKeyboardShortcuts.js';
 import { getImageElement, renderImage } from './images.js';
 import { insertImageFile } from './imageInsert.js';
 import {
+  type AnchorPoint,
   type Bounds,
   type HandleId,
+  findNearestAnchor,
   fontOf,
   getBounds,
+  getObjectAnchors,
   hitTest,
   isLinear,
   lighten,
   moveChanges,
   pickHandle,
   pickTopmost,
+  recomputeBoundConnector,
   renderSelection,
   renderShape,
   resizeChanges,
@@ -48,6 +55,7 @@ const DEFAULT_SIZE = {
   ellipse: { w: 140, h: 90 },
   line: { w: 140, h: 0 },
   arrow: { w: 140, h: 0 },
+  connector: { w: 140, h: 60 },
   text: { w: 220, h: 40 },
   sticky_note: { w: 180, h: 180 },
 } as const;
@@ -59,7 +67,7 @@ const isShapeTool = (t: string): t is ShapeTool => t in DEFAULT_SIZE;
 type DragState =
   | { kind: 'move'; sx: number; sy: number; ids: string[]; moved: boolean }
   | { kind: 'resize'; id: string; handle: HandleId }
-  | { kind: 'create'; sx: number; sy: number; tool: ShapeTool };
+  | { kind: 'create'; sx: number; sy: number; tool: ShapeTool; startAnchor?: AnchorRef };
 
 /** Inline editor for text boxes, sticky notes and text inside shapes. */
 interface EditorState {
@@ -358,6 +366,8 @@ export const WhiteboardCanvas: React.FC = () => {
   /** Local-only geometry overrides while dragging; committed as OBJECT_UPDATE on pointer-up. */
   const [preview, setPreview] = useState<Record<string, WhiteboardObject>>({});
   const [draft, setDraft] = useState<ShapeObject | null>(null);
+  const [snapAnchor, setSnapAnchor] = useState<AnchorPoint | null>(null);
+  const [connectorHoverObjId, setConnectorHoverObjId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [imageTick, setImageTick] = useState(0);
   const laserTrails = useRef<Map<string, LaserTrail>>(new Map());
@@ -387,6 +397,14 @@ export const WhiteboardCanvas: React.FC = () => {
       });
     }
   }, [editor]);
+
+  // Clear connector hover/snap UI when switching away from the connector tool
+  useEffect(() => {
+    if (activeTool !== 'connector') {
+      setSnapAnchor(null);
+      setConnectorHoverObjId(null);
+    }
+  }, [activeTool]);
 
   // Author attribution tooltip state
   const [hoveredAuthor, setHoveredAuthor] = useState<HoveredAuthorInfo | null>(null);
@@ -546,6 +564,56 @@ export const WhiteboardCanvas: React.FC = () => {
       renderSelection(ctx, obj, zoom, selected.length === 1);
     }
 
+    // Connector magnetic edge anchors & active snap ring
+    if (activeTool === 'connector' && !following) {
+      const hoverObj = connectorHoverObjId
+        ? (preview[connectorHoverObjId] ?? objects[connectorHoverObjId])
+        : null;
+      if (hoverObj) {
+        const anchors = getObjectAnchors(hoverObj);
+        for (const pt of anchors) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 4.5 / zoom, 0, Math.PI * 2);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          ctx.lineWidth = 1.75 / zoom;
+          ctx.strokeStyle = '#2563EB';
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      if (draft?.startAnchor && objects[draft.startAnchor.objectId]) {
+        const startAnchors = getObjectAnchors(objects[draft.startAnchor.objectId]!);
+        const startPt = startAnchors.find((a) => a.side === draft.startAnchor!.side);
+        if (startPt) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(startPt.x, startPt.y, 5 / zoom, 0, Math.PI * 2);
+          ctx.fillStyle = '#2563EB';
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      if (snapAnchor) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(snapAnchor.x, snapAnchor.y, 10 / zoom, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(37, 99, 235, 0.22)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(snapAnchor.x, snapAnchor.y, 5.5 / zoom, 0, Math.PI * 2);
+        ctx.fillStyle = '#2563EB';
+        ctx.fill();
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     // Render active local in-progress stroke with 60 FPS optimistic smoothness
     if (liveLocalStroke) {
       renderStroke(ctx, liveLocalStroke, false);
@@ -567,7 +635,14 @@ export const WhiteboardCanvas: React.FC = () => {
         } else {
           const prev = lastRemoteLaserCoordsRef.current.get(cursor.userId);
           if (!prev || prev.x !== cursor.x || prev.y !== cursor.y) {
-            addLaserPoint(laserTrails.current, cursor.userId, cursor.color, cursor.x, cursor.y, nowMs);
+            addLaserPoint(
+              laserTrails.current,
+              cursor.userId,
+              cursor.color,
+              cursor.x,
+              cursor.y,
+              nowMs,
+            );
             lastRemoteLaserCoordsRef.current.set(cursor.userId, { x: cursor.x, y: cursor.y });
           }
         }
@@ -634,6 +709,8 @@ export const WhiteboardCanvas: React.FC = () => {
     eraserPos,
     preview,
     draft,
+    snapAnchor,
+    connectorHoverObjId,
     editor,
     selectedIds,
     imageData,
@@ -668,8 +745,16 @@ export const WhiteboardCanvas: React.FC = () => {
   }, []);
 
   /** Builds a not-yet-sent shape from the active tool properties. */
-  const buildShape = (tool: ShapeTool, x: number, y: number, w: number, h: number): ShapeObject => {
-    const linear = tool === 'line' || tool === 'arrow';
+  const buildShape = (
+    tool: ShapeTool,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    startAnchor?: AnchorRef,
+    endAnchor?: AnchorRef,
+  ): ShapeObject => {
+    const linear = tool === 'line' || tool === 'arrow' || tool === 'connector';
     const box = !linear;
     return {
       id: 'draft',
@@ -696,29 +781,103 @@ export const WhiteboardCanvas: React.FC = () => {
       bold: toolProps.bold,
       italic: toolProps.italic,
       align: toolProps.align,
+      ...(startAnchor ? { startAnchor } : {}),
+      ...(endAnchor ? { endAnchor } : {}),
     };
   };
 
-  /** Returns `o` with geometry changes applied locally (no seq bump; preview only). */
-  const applyPreview = (
-    o: WhiteboardObject,
-    c: ReturnType<typeof moveChanges>,
-  ): WhiteboardObject => {
-    if (o.type === 'stroke') return c.points ? { ...o, points: c.points } : o;
-    if (o.type === 'image') return { ...o, ...c } as WhiteboardObject;
-    return { ...o, ...c, fillColor: o.fillColor } as ShapeObject;
+  /** Computes move changes for selected objects plus any attached bound connectors. */
+  const computeMovedObjects = (
+    ids: string[],
+    dx: number,
+    dy: number,
+  ): Record<string, ObjectChanges> => {
+    const idSet = new Set(ids);
+    const changesById: Record<string, ObjectChanges> = {};
+    const merged: Record<string, WhiteboardObject> = { ...objects };
+
+    for (const id of ids) {
+      const o = objects[id];
+      if (!o) continue;
+      // If a connector's attached box is also being moved, let recomputeBoundConnector track it instead of detaching
+      if (
+        o.type === 'shape' &&
+        o.shapeType === 'connector' &&
+        ((o.startAnchor && idSet.has(o.startAnchor.objectId)) ||
+          (o.endAnchor && idSet.has(o.endAnchor.objectId)))
+      ) {
+        continue;
+      }
+      const ch = moveChanges(o, dx, dy);
+      changesById[id] = ch;
+      merged[id] = applyObjectChanges(o, ch, o.seq, o.updatedAt);
+    }
+
+    for (const obj of Object.values(objects)) {
+      if (obj.type === 'shape' && obj.shapeType === 'connector') {
+        const startAffected = obj.startAnchor && obj.startAnchor.objectId in changesById;
+        const endAffected = obj.endAnchor && obj.endAnchor.objectId in changesById;
+        if (startAffected || endAffected) {
+          const ch = recomputeBoundConnector(obj, merged);
+          if (ch) changesById[obj.id] = ch;
+        }
+      }
+    }
+    return changesById;
+  };
+
+  /** Computes resize changes for a shape plus any attached bound connectors. */
+  const computeResizedObjects = (
+    obj: ShapeObject,
+    handle: HandleId,
+    px: number,
+    py: number,
+  ): Record<string, ObjectChanges> => {
+    const boxChanges = resizeChanges(obj, handle, px, py);
+    const changesById: Record<string, ObjectChanges> = { [obj.id]: boxChanges };
+    const merged: Record<string, WhiteboardObject> = {
+      ...objects,
+      [obj.id]: applyObjectChanges(obj, boxChanges, obj.seq, obj.updatedAt),
+    };
+
+    for (const candidate of Object.values(objects)) {
+      if (
+        candidate.type === 'shape' &&
+        candidate.shapeType === 'connector' &&
+        (candidate.startAnchor?.objectId === obj.id || candidate.endAnchor?.objectId === obj.id)
+      ) {
+        const ch = recomputeBoundConnector(candidate, merged);
+        if (ch) changesById[candidate.id] = ch;
+      }
+    }
+    return changesById;
   };
 
   /** Finishes a create-drag: text/sticky open the editor, other shapes are sent immediately. */
   const finishCreate = (drag: Extract<DragState, { kind: 'create' }>, x: number, y: number) => {
     setDraft(null);
-    const dx = x - drag.sx;
-    const dy = y - drag.sy;
+    setSnapAnchor(null);
+    setConnectorHoverObjId(null);
+
+    let endX = x;
+    let endY = y;
+    let endAnchor: AnchorRef | undefined;
+    if (drag.tool === 'connector') {
+      const endSnap = findNearestAnchor(objects, x, y, 22 / zoom, drag.startAnchor?.objectId);
+      if (endSnap) {
+        endX = endSnap.x;
+        endY = endSnap.y;
+        endAnchor = { objectId: endSnap.objectId, side: endSnap.side };
+      }
+    }
+
+    const dx = endX - drag.sx;
+    const dy = endY - drag.sy;
     const tiny = Math.hypot(dx, dy) * zoom < 6;
     const def = DEFAULT_SIZE[drag.tool];
     const shape = tiny
-      ? buildShape(drag.tool, drag.sx, drag.sy, def.w, def.h)
-      : buildShape(drag.tool, drag.sx, drag.sy, dx, dy);
+      ? buildShape(drag.tool, drag.sx, drag.sy, def.w, def.h, drag.startAnchor)
+      : buildShape(drag.tool, drag.sx, drag.sy, dx, dy, drag.startAnchor, endAnchor);
 
     if (drag.tool === 'sticky_note') {
       const id = addShape({ ...shape, text: '' });
@@ -936,6 +1095,20 @@ export const WhiteboardCanvas: React.FC = () => {
           return;
         }
       }
+      if (activeTool === 'connector') {
+        const startSnap = findNearestAnchor(objects, x, y, 22 / zoom);
+        const sx = startSnap ? startSnap.x : x;
+        const sy = startSnap ? startSnap.y : y;
+        const startAnchor: AnchorRef | undefined = startSnap
+          ? { objectId: startSnap.objectId, side: startSnap.side }
+          : undefined;
+        setSnapAnchor(startSnap);
+        dragRef.current = { kind: 'create', sx, sy, tool: 'connector', startAnchor };
+        setDraft(buildShape('connector', sx, sy, 0, 0, startAnchor));
+        containerRef.current?.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
       dragRef.current = { kind: 'create', sx: x, sy: y, tool: activeTool };
       setDraft(buildShape(activeTool, x, y, 0, 0));
       containerRef.current?.setPointerCapture(e.pointerId);
@@ -1002,23 +1175,62 @@ export const WhiteboardCanvas: React.FC = () => {
     const drag = dragRef.current;
     if (drag) {
       if (drag.kind === 'create') {
-        setDraft(buildShape(drag.tool, drag.sx, drag.sy, x - drag.sx, y - drag.sy));
+        if (drag.tool === 'connector') {
+          const endSnap = findNearestAnchor(objects, x, y, 22 / zoom, drag.startAnchor?.objectId);
+          const tx = endSnap ? endSnap.x : x;
+          const ty = endSnap ? endSnap.y : y;
+          const endAnchor: AnchorRef | undefined = endSnap
+            ? { objectId: endSnap.objectId, side: endSnap.side }
+            : undefined;
+          setSnapAnchor(endSnap);
+          setConnectorHoverObjId(endSnap ? endSnap.objectId : null);
+          setDraft(
+            buildShape(
+              'connector',
+              drag.sx,
+              drag.sy,
+              tx - drag.sx,
+              ty - drag.sy,
+              drag.startAnchor,
+              endAnchor,
+            ),
+          );
+        } else {
+          setDraft(buildShape(drag.tool, drag.sx, drag.sy, x - drag.sx, y - drag.sy));
+        }
       } else if (drag.kind === 'move') {
         const dx = x - drag.sx;
         const dy = y - drag.sy;
         if (!drag.moved && Math.hypot(dx, dy) * zoom < 3) return;
         drag.moved = true;
+        const updates = computeMovedObjects(drag.ids, dx, dy);
         const next: Record<string, WhiteboardObject> = {};
-        for (const id of drag.ids) {
+        for (const [id, ch] of Object.entries(updates)) {
           const o = objects[id];
-          if (o) next[id] = applyPreview(o, moveChanges(o, dx, dy));
+          if (o) next[id] = applyObjectChanges(o, ch, o.seq, o.updatedAt);
         }
         setPreview(next);
       } else {
         const o = objects[drag.id];
         if (o && o.type === 'shape') {
-          setPreview({ [o.id]: applyPreview(o, resizeChanges(o, drag.handle, x, y)) });
+          const updates = computeResizedObjects(o, drag.handle, x, y);
+          const next: Record<string, WhiteboardObject> = {};
+          for (const [id, ch] of Object.entries(updates)) {
+            const existing = objects[id];
+            if (existing)
+              next[id] = applyObjectChanges(existing, ch, existing.seq, existing.updatedAt);
+          }
+          setPreview(next);
         }
+      }
+    } else if (activeTool === 'connector' && !isPanning) {
+      const near = findNearestAnchor(objects, x, y, 22 / zoom);
+      setSnapAnchor(near);
+      if (near) {
+        setConnectorHoverObjId(near.objectId);
+      } else {
+        const hovered = pickTopmost(objects, x, y, 12 / zoom);
+        setConnectorHoverObjId(hovered && getObjectAnchors(hovered).length > 0 ? hovered.id : null);
       }
     }
 
@@ -1161,12 +1373,20 @@ export const WhiteboardCanvas: React.FC = () => {
         if (drag.moved) {
           const dx = x - drag.sx;
           const dy = y - drag.sy;
-          updateObjects(drag.ids, (o) => moveChanges(o, dx, dy));
+          const updates = computeMovedObjects(drag.ids, dx, dy);
+          const ids = Object.keys(updates);
+          if (ids.length > 0) {
+            updateObjects(ids, (o) => updates[o.id]!);
+          }
         }
       } else {
         const o = objects[drag.id];
         if (o && o.type === 'shape') {
-          updateObjects([o.id], () => resizeChanges(o, drag.handle, x, y));
+          const updates = computeResizedObjects(o, drag.handle, x, y);
+          const ids = Object.keys(updates);
+          if (ids.length > 0) {
+            updateObjects(ids, (item) => updates[item.id]!);
+          }
         }
       }
       setPreview({});
@@ -1205,6 +1425,8 @@ export const WhiteboardCanvas: React.FC = () => {
 
   const handlePointerLeave = () => {
     setEraserPos(null);
+    setSnapAnchor(null);
+    setConnectorHoverObjId(null);
     if (hoveredAuthor) {
       setHoveredAuthor(null);
     }

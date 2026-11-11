@@ -52,6 +52,13 @@ export const StrokeObjectSchema = BaseWhiteboardObjectSchema.extend({
   isComplete: z.boolean(),
 });
 
+export const AnchorSideSchema = z.enum(['top', 'bottom', 'left', 'right']);
+
+export const AnchorRefSchema = z.object({
+  objectId: z.string().uuid(),
+  side: AnchorSideSchema,
+});
+
 export const ShapeObjectSchema = BaseWhiteboardObjectSchema.extend({
   type: z.literal('shape'),
   shapeType: ShapeTypeSchema,
@@ -71,6 +78,8 @@ export const ShapeObjectSchema = BaseWhiteboardObjectSchema.extend({
   align: z.enum(['left', 'center', 'right']).optional(),
   bold: z.boolean().optional(),
   italic: z.boolean().optional(),
+  startAnchor: AnchorRefSchema.optional(),
+  endAnchor: AnchorRefSchema.optional(),
 });
 
 export const ImageMimeSchema = z.enum(['image/png', 'image/jpeg', 'image/webp']);
@@ -144,6 +153,8 @@ export const ObjectChangesSchema = z
     align: z.enum(['left', 'center', 'right']),
     bold: z.boolean(),
     italic: z.boolean(),
+    startAnchor: AnchorRefSchema.nullable(),
+    endAnchor: AnchorRefSchema.nullable(),
     color: HexColor,
     points: z.array(PointSchema).min(1).max(5000),
   })

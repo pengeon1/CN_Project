@@ -10,7 +10,13 @@
  * re-application of an echoed operation idempotent.
  */
 
-import type { ImageObject, Point, ShapeObject, WhiteboardObject } from '../types/whiteboard.js';
+import type {
+  AnchorRef,
+  ImageObject,
+  Point,
+  ShapeObject,
+  WhiteboardObject,
+} from '../types/whiteboard.js';
 
 /**
  * Properties that may be changed by OBJECT_UPDATE. `null` removes an optional property.
@@ -18,7 +24,7 @@ import type { ImageObject, Point, ShapeObject, WhiteboardObject } from '../types
  */
 export interface ObjectChanges {
   zIndex?: number;
-  // Shapes, text and sticky notes
+  // Shapes, text, connectors and sticky notes
   x?: number;
   y?: number;
   width?: number;
@@ -32,6 +38,8 @@ export interface ObjectChanges {
   align?: 'left' | 'center' | 'right';
   bold?: boolean;
   italic?: boolean;
+  startAnchor?: AnchorRef | null;
+  endAnchor?: AnchorRef | null;
   // Freehand strokes
   color?: string;
   points?: Point[];
@@ -73,6 +81,10 @@ export function applyObjectChanges(
     }
     if (changes.fillColor === null) delete next.fillColor;
     else if (changes.fillColor !== undefined) next.fillColor = changes.fillColor;
+    if (changes.startAnchor === null) delete next.startAnchor;
+    else if (changes.startAnchor !== undefined) next.startAnchor = changes.startAnchor;
+    if (changes.endAnchor === null) delete next.endAnchor;
+    else if (changes.endAnchor !== undefined) next.endAnchor = changes.endAnchor;
   } else if (obj.type === 'image') {
     for (const key of ['x', 'y', 'width', 'height'] as const) {
       if (changes[key] !== undefined) next[key] = changes[key];

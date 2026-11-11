@@ -8,6 +8,7 @@
  */
 
 import type {
+  AnchorSide,
   ImageObject,
   ObjectChanges,
   ShapeObject,
@@ -22,15 +23,140 @@ export interface Bounds {
   h: number;
 }
 
+export interface AnchorPoint {
+  objectId: string;
+  side: AnchorSide;
+  x: number;
+  y: number;
+}
+
 export type HandleId = 'nw' | 'ne' | 'sw' | 'se';
 export const HANDLE_SIZE = 8;
 export const STICKY_TEXT_COLOR = '#111827';
 
-/** True for shapes whose geometry is a directed segment rather than a box. */
+/** True for shapes whose geometry is a directed segment / connector rather than a box. */
 export function isLinear(
   obj: WhiteboardObject,
-): obj is ShapeObject & { shapeType: 'line' | 'arrow' } {
-  return obj.type === 'shape' && (obj.shapeType === 'line' || obj.shapeType === 'arrow');
+): obj is ShapeObject & { shapeType: 'line' | 'arrow' | 'connector' } {
+  return (
+    obj.type === 'shape' &&
+    (obj.shapeType === 'line' || obj.shapeType === 'arrow' || obj.shapeType === 'connector')
+  );
+}
+
+/** Returns the 4 cardinal edge anchor points of a box-like object for magnetic connector snapping. */
+export function getObjectAnchors(obj: WhiteboardObject): AnchorPoint[] {
+  if (obj.type === 'stroke' || isLinear(obj)) return [];
+  const b = getBounds(obj);
+  if (b.w < 4 && b.h < 4) return [];
+  return [
+    { objectId: obj.id, side: 'top', x: b.x + b.w / 2, y: b.y },
+    { objectId: obj.id, side: 'right', x: b.x + b.w, y: b.y + b.h / 2 },
+    { objectId: obj.id, side: 'bottom', x: b.x + b.w / 2, y: b.y + b.h },
+    { objectId: obj.id, side: 'left', x: b.x, y: b.y + b.h / 2 },
+  ];
+}
+
+/** Resolves the world coordinate of a specific cardinal side on an object. */
+export function resolveAnchorPoint(
+  obj: WhiteboardObject,
+  side: AnchorSide,
+): { x: number; y: number } | null {
+  const anchor = getObjectAnchors(obj).find((a) => a.side === side);
+  return anchor ? { x: anchor.x, y: anchor.y } : null;
+}
+
+/** Finds the closest snap anchor within `maxDist` world units of `(px, py)`. */
+export function findNearestAnchor(
+  objects: Record<string, WhiteboardObject>,
+  px: number,
+  py: number,
+  maxDist: number,
+  excludeObjectId?: string,
+): AnchorPoint | null {
+  let best: AnchorPoint | null = null;
+  let bestDist = maxDist;
+  for (const obj of Object.values(objects)) {
+    if (obj.id === excludeObjectId) continue;
+    for (const anchor of getObjectAnchors(obj)) {
+      const d = Math.hypot(px - anchor.x, py - anchor.y);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = anchor;
+      }
+    }
+  }
+  return best;
+}
+
+/** Computes orthogonal elbowed waypoints for a flowchart connector shape. */
+export function getConnectorWaypoints(s: ShapeObject): Array<{ x: number; y: number }> {
+  const x1 = s.x;
+  const y1 = s.y;
+  const x2 = s.x + s.width;
+  const y2 = s.y + s.height;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+
+  if (Math.abs(dx) < 2 || Math.abs(dy) < 2) {
+    return [
+      { x: x1, y: y1 },
+      { x: x2, y: y2 },
+    ];
+  }
+
+  const startSide = s.startAnchor?.side;
+  const endSide = s.endAnchor?.side;
+
+  const startAxis: 'h' | 'v' =
+    startSide === 'left' || startSide === 'right'
+      ? 'h'
+      : startSide === 'top' || startSide === 'bottom'
+        ? 'v'
+        : Math.abs(dx) >= Math.abs(dy)
+          ? 'h'
+          : 'v';
+
+  const endAxis: 'h' | 'v' =
+    endSide === 'left' || endSide === 'right'
+      ? 'h'
+      : endSide === 'top' || endSide === 'bottom'
+        ? 'v'
+        : startAxis;
+
+  if (startAxis === 'h' && endAxis === 'v') {
+    return [
+      { x: x1, y: y1 },
+      { x: x2, y: y1 },
+      { x: x2, y: y2 },
+    ];
+  }
+
+  if (startAxis === 'v' && endAxis === 'h') {
+    return [
+      { x: x1, y: y1 },
+      { x: x1, y: y2 },
+      { x: x2, y: y2 },
+    ];
+  }
+
+  if (startAxis === 'h') {
+    const midX = x1 + dx / 2;
+    return [
+      { x: x1, y: y1 },
+      { x: midX, y: y1 },
+      { x: midX, y: y2 },
+      { x: x2, y: y2 },
+    ];
+  }
+
+  const midY = y1 + dy / 2;
+  return [
+    { x: x1, y: y1 },
+    { x: x1, y: midY },
+    { x: x2, y: midY },
+    { x: x2, y: y2 },
+  ];
 }
 
 /** Axis-aligned bounding box in world coordinates. */
@@ -107,6 +233,16 @@ export function distanceToStroke(px: number, py: number, s: StrokeObject): numbe
 export function hitTest(obj: WhiteboardObject, px: number, py: number, tol: number): boolean {
   if (obj.type === 'stroke') return distanceToStroke(px, py, obj) <= tol + obj.width / 2;
   if (isLinear(obj)) {
+    if (obj.shapeType === 'connector') {
+      const pts = getConnectorWaypoints(obj);
+      const hitTol = tol + obj.strokeWidth / 2;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i]!;
+        const b = pts[i + 1]!;
+        if (distToSegment(px, py, a.x, a.y, b.x, b.y) <= hitTol) return true;
+      }
+      return false;
+    }
     return (
       distToSegment(px, py, obj.x, obj.y, obj.x + obj.width, obj.y + obj.height) <=
       tol + obj.strokeWidth / 2
@@ -200,7 +336,64 @@ export function moveChanges(obj: WhiteboardObject, dx: number, dy: number): Obje
   if (obj.type === 'stroke') {
     return { points: obj.points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })) };
   }
+  if (obj.type === 'shape' && obj.shapeType === 'connector') {
+    return {
+      x: obj.x + dx,
+      y: obj.y + dy,
+      ...(obj.startAnchor ? { startAnchor: null } : {}),
+      ...(obj.endAnchor ? { endAnchor: null } : {}),
+    };
+  }
   return { x: obj.x + dx, y: obj.y + dy };
+}
+
+/**
+ * Computes geometry updates for a bound connector whose attached boxes moved or resized.
+ * Returns null if the connector is unbound or neither endpoint moved.
+ */
+export function recomputeBoundConnector(
+  connector: ShapeObject,
+  latestObjects: Record<string, WhiteboardObject>,
+): ObjectChanges | null {
+  if (connector.shapeType !== 'connector') return null;
+  if (!connector.startAnchor && !connector.endAnchor) return null;
+
+  let startX = connector.x;
+  let startY = connector.y;
+  let endX = connector.x + connector.width;
+  let endY = connector.y + connector.height;
+  let changed = false;
+
+  if (connector.startAnchor) {
+    const target = latestObjects[connector.startAnchor.objectId];
+    if (target) {
+      const pt = resolveAnchorPoint(target, connector.startAnchor.side);
+      if (pt && (pt.x !== startX || pt.y !== startY)) {
+        startX = pt.x;
+        startY = pt.y;
+        changed = true;
+      }
+    }
+  }
+  if (connector.endAnchor) {
+    const target = latestObjects[connector.endAnchor.objectId];
+    if (target) {
+      const pt = resolveAnchorPoint(target, connector.endAnchor.side);
+      if (pt && (pt.x !== endX || pt.y !== endY)) {
+        endX = pt.x;
+        endY = pt.y;
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) return null;
+  return {
+    x: startX,
+    y: startY,
+    width: endX - startX,
+    height: endY - startY,
+  };
 }
 
 /** Changes that apply a chosen color to the right property of each object kind. */
@@ -307,6 +500,65 @@ export function renderShape(ctx: CanvasRenderingContext2D, s: ShapeObject, hideT
           y2 - head * Math.sin(ang + Math.PI / 6),
         );
         ctx.stroke();
+      }
+      break;
+    }
+    case 'connector': {
+      const pts = getConnectorWaypoints(s);
+      if (pts.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0]!.x, pts[0]!.y);
+        for (let i = 1; i < pts.length - 1; i++) {
+          const prev = pts[i - 1]!;
+          const curr = pts[i]!;
+          const next = pts[i + 1]!;
+          const d1 = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+          const d2 = Math.hypot(next.x - curr.x, next.y - curr.y);
+          const r = Math.min(12, d1 * 0.45, d2 * 0.45);
+          if (r > 0.5 && d1 > 0 && d2 > 0) {
+            const sx = curr.x - ((curr.x - prev.x) / d1) * r;
+            const sy = curr.y - ((curr.y - prev.y) / d1) * r;
+            const ex = curr.x + ((next.x - curr.x) / d2) * r;
+            const ey = curr.y + ((next.y - curr.y) / d2) * r;
+            ctx.lineTo(sx, sy);
+            ctx.quadraticCurveTo(curr.x, curr.y, ex, ey);
+          } else {
+            ctx.lineTo(curr.x, curr.y);
+          }
+        }
+        const last = pts[pts.length - 1]!;
+        const beforeLast = pts[pts.length - 2]!;
+        const tailLen = Math.hypot(last.x - beforeLast.x, last.y - beforeLast.y);
+        const headSize = Math.max(10, s.strokeWidth * 3.5);
+        const tipOffset = tailLen > headSize ? headSize * 0.75 : 0;
+        const ang = Math.atan2(last.y - beforeLast.y, last.x - beforeLast.x);
+        ctx.lineTo(last.x - tipOffset * Math.cos(ang), last.y - tipOffset * Math.sin(ang));
+        ctx.stroke();
+
+        // Start anchor node (filled if docked onto a shape, hollow ring if free)
+        const nodeRadius = Math.max(3.5, s.strokeWidth * 1.15);
+        ctx.beginPath();
+        ctx.arc(pts[0]!.x, pts[0]!.y, nodeRadius, 0, Math.PI * 2);
+        ctx.fillStyle = s.startAnchor ? s.strokeColor : '#FFFFFF';
+        ctx.fill();
+        ctx.stroke();
+
+        // Solid filled flowchart arrowhead aligned with final orthogonal segment
+        if (tailLen >= 2) {
+          ctx.beginPath();
+          ctx.moveTo(last.x, last.y);
+          ctx.lineTo(
+            last.x - headSize * Math.cos(ang - Math.PI / 6),
+            last.y - headSize * Math.sin(ang - Math.PI / 6),
+          );
+          ctx.lineTo(
+            last.x - headSize * Math.cos(ang + Math.PI / 6),
+            last.y - headSize * Math.sin(ang + Math.PI / 6),
+          );
+          ctx.closePath();
+          ctx.fillStyle = s.strokeColor;
+          ctx.fill();
+        }
       }
       break;
     }

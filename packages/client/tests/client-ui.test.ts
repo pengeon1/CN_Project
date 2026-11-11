@@ -688,10 +688,10 @@ describe('Client UI & Store Suite', () => {
     expect(TOOL_SHORTCUTS['S']).toBe('sticky_note');
     expect(TOOL_SHORTCUTS['l']).toBe('arrow');
     expect(TOOL_SHORTCUTS['L']).toBe('arrow');
-    expect(TOOL_SHORTCUTS['x']).toBe('arrow');
-    expect(TOOL_SHORTCUTS['X']).toBe('arrow');
-    expect(TOOL_SHORTCUTS['c']).toBe('arrow');
-    expect(TOOL_SHORTCUTS['C']).toBe('arrow');
+    expect(TOOL_SHORTCUTS['x']).toBe('connector');
+    expect(TOOL_SHORTCUTS['X']).toBe('connector');
+    expect(TOOL_SHORTCUTS['c']).toBe('connector');
+    expect(TOOL_SHORTCUTS['C']).toBe('connector');
   });
 
   it('detects editable form elements to prevent hotkey hijacking while typing', () => {

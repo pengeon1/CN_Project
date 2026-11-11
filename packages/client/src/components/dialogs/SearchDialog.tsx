@@ -86,10 +86,16 @@ export const SearchDialog: React.FC = () => {
           }
         } else {
           if (text.toLowerCase().includes(q)) {
+            const label =
+              obj.shapeType === 'ellipse'
+                ? 'Ellipse'
+                : obj.shapeType === 'connector'
+                  ? 'Connector'
+                  : 'Rectangle';
             matches.push({
               id: `obj-${obj.id}`,
               category: 'shape',
-              title: `${obj.shapeType === 'ellipse' ? 'Ellipse' : 'Rectangle'}: ${text.slice(0, 40)}`,
+              title: `${label}: ${text.slice(0, 40)}`,
               snippet: text.length > 40 ? text.slice(40, 90) + '…' : undefined,
               action: () => focusObject(obj.id),
             });

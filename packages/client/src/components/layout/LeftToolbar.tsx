@@ -135,11 +135,11 @@ export const LeftToolbar: React.FC = () => {
 
       {/* Connector Tool */}
       <button
-        onClick={() => setActiveTool('arrow')}
+        onClick={() => setActiveTool('connector')}
         disabled={!canEdit}
-        title={canEdit ? 'Connector / Arrow (X or L)' : 'Connector (read-only)'}
+        title={canEdit ? 'Connector (X or C)' : 'Connector (read-only)'}
         className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
-          activeTool === 'arrow'
+          activeTool === 'connector'
             ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
             : canEdit
               ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'

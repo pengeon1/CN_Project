@@ -12,12 +12,16 @@ import {
 import { applySequencedOpToObjects } from '../src/store/useWhiteboardStore.js';
 import {
   colorChanges,
+  findNearestAnchor,
   getBounds,
+  getConnectorWaypoints,
+  getObjectAnchors,
   hitTest,
   lighten,
   moveChanges,
   pickHandle,
   pickTopmost,
+  recomputeBoundConnector,
   resizeChanges,
   stickyFill,
 } from '../src/components/canvas/shapes.js';
@@ -111,5 +115,85 @@ describe('Phase 12 client', () => {
     });
     expect(stickyFill('#000000')).toBe('#FDE68A');
     expect(lighten('#000000', 1)).toBe('#FFFFFF');
+  });
+
+  it('routes orthogonal elbow waypoints and hit-tests connector segments accurately', () => {
+    const conn = mk({
+      shapeType: 'connector',
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 100,
+      startAnchor: { objectId: generateUuid(), side: 'right' },
+      endAnchor: { objectId: generateUuid(), side: 'left' },
+    });
+
+    const pts = getConnectorWaypoints(conn);
+    expect(pts).toEqual([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 200, y: 100 },
+    ]);
+
+    // Hit orthogonal middle segment at x=100, y=50
+    expect(hitTest(conn, 100, 50, 4)).toBe(true);
+    // Miss off-path corner
+    expect(hitTest(conn, 25, 75, 4)).toBe(false);
+
+    // L-bend when connecting perpendicular sides (right -> top)
+    const lConn = mk({
+      shapeType: 'connector',
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 80,
+      startAnchor: { objectId: generateUuid(), side: 'right' },
+      endAnchor: { objectId: generateUuid(), side: 'top' },
+    });
+    expect(getConnectorWaypoints(lConn)).toEqual([
+      { x: 0, y: 0 },
+      { x: 120, y: 0 },
+      { x: 120, y: 80 },
+    ]);
+  });
+
+  it('snaps to box anchors, stays bound when boxes move, and detaches when moved alone', () => {
+    const boxA = mk({ id: generateUuid(), x: 0, y: 0, width: 100, height: 60 });
+    const boxB = mk({ id: generateUuid(), x: 250, y: 100, width: 100, height: 60 });
+    const objects: Record<string, WhiteboardObject> = { [boxA.id]: boxA, [boxB.id]: boxB };
+
+    expect(getObjectAnchors(boxA)).toHaveLength(4);
+    // Nearest anchor to boxA right edge (100, 30)
+    const nearA = findNearestAnchor(objects, 96, 33, 20);
+    expect(nearA).toMatchObject({ objectId: boxA.id, side: 'right', x: 100, y: 30 });
+
+    const conn = mk({
+      shapeType: 'connector',
+      x: 100,
+      y: 30,
+      width: 150,
+      height: 100,
+      startAnchor: { objectId: boxA.id, side: 'right' },
+      endAnchor: { objectId: boxB.id, side: 'left' },
+    });
+
+    // Move boxA by (+40, +20)
+    const movedBoxA = { ...boxA, x: 40, y: 20 };
+    const updatedMap = { ...objects, [boxA.id]: movedBoxA };
+    expect(recomputeBoundConnector(conn, updatedMap)).toEqual({
+      x: 140,
+      y: 50,
+      width: 110,
+      height: 80,
+    });
+
+    // Moving connector itself detaches both anchors
+    expect(moveChanges(conn, 15, 25)).toEqual({
+      x: 115,
+      y: 55,
+      startAnchor: null,
+      endAnchor: null,
+    });
   });
 });

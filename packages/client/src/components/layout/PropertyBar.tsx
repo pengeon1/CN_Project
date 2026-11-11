@@ -57,7 +57,11 @@ export const PropertyBar: React.FC = () => {
   const first = selection[0];
   const firstShape: ShapeObject | undefined = first?.type === 'shape' ? first : undefined;
   const hasBoxText = selection.some(
-    (o) => o.type === 'shape' && o.shapeType !== 'line' && o.shapeType !== 'arrow',
+    (o) =>
+      o.type === 'shape' &&
+      o.shapeType !== 'line' &&
+      o.shapeType !== 'arrow' &&
+      o.shapeType !== 'connector',
   );
   const hasFillable = selection.some(
     (o) => o.type === 'shape' && (o.shapeType === 'rectangle' || o.shapeType === 'ellipse'),
@@ -105,7 +109,12 @@ export const PropertyBar: React.FC = () => {
   }) =>
     editingSelection
       ? updateObjects(selectedIds, (o) =>
-          o.type === 'shape' && o.shapeType !== 'line' && o.shapeType !== 'arrow' ? c : {},
+          o.type === 'shape' &&
+          o.shapeType !== 'line' &&
+          o.shapeType !== 'arrow' &&
+          o.shapeType !== 'connector'
+            ? c
+            : {},
         )
       : setToolProps(c);
   const nextAlign =
@@ -118,6 +127,7 @@ export const PropertyBar: React.FC = () => {
     'ellipse',
     'line',
     'arrow',
+    'connector',
     'text',
     'sticky_note',
   ].includes(activeTool);

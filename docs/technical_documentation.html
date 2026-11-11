@@ -113,9 +113,9 @@
   </head>
   <body>
     <h1>LAN-Based Multi-User Collaborative Whiteboard: Technical Documentation &amp; User Guide</h1>
-    <p><strong>Course</strong>: Computer Networks Laboratory (CS304)</p>
+    <p><strong>Course</strong>: Computer Networks Laboratory (CS3004)</p>
     <p><strong>Academic Year</strong>: 2026-2027</p>
-    <p><strong>Document Revision</strong>: 1.0.0 (Release Candidate)</p>
+    <p><strong>Document Revision</strong>: 1.0.0</p>
     <p><strong>Deliverable</strong>: Comprehensive Technical Report &amp; User Guide</p>
     <hr />
     <h2>Abstract</h2>
@@ -155,8 +155,9 @@
     </p>
     <p>
       3. Provides an interactive, low-latency graphical user interface supporting freehand drawing,
-      stroke erasing, geometric shapes, editable text, sticky notes, image insertion, and integrated
-      group chat.
+      stroke erasing, geometric shapes (with outline/fill colors and centered inline text), smart
+      orthogonal connectors, editable text, sticky notes, image insertion, smooth laser pointer,
+      board search, and integrated group chat.
     </p>
     <p>
       4. Maintains strong eventual consistency across multiple concurrent participants without state
@@ -273,22 +274,22 @@
       </li>
       <li>
         <strong>Stateful Framing Decoder</strong>: Accumulates incoming chunks. Once 4 header bytes
-        are available, it extracts payload length $L$. It buffers bytes until $4 + L$ bytes exist,
-        slices the frame, parses JSON, and immediately loops to decode any concatenated frames
-        packed in the same TCP segment.
+        are available, it extracts payload length <code>L</code>. It buffers bytes until
+        <code>4 + L</code> bytes exist, slices the frame, parses JSON, and immediately loops to
+        decode any concatenated frames packed in the same TCP segment.
       </li>
     </ul>
     <h3>3.3 Universal Message Envelope</h3>
     <pre><code class="lang-typescript">
 interface MessageEnvelope&lt;T = unknown&gt; {
-  v: number;        // Protocol version (1)
-  type: MessageType;// Action discriminator (e.g. STROKE_BEGIN, SHAPE_ADD)
-  msg_id: string;   // Unique UUIDv4 tracking identifier
-  seq: number;      // Monotonic sequence number (0 from client, &gt;0 from server)
-  ts: number;       // Epoch timestamp in milliseconds
-  room: string;     // 6-character room identifier
-  user_id: string;  // Client UUID
-  payload: T;       // Strongly-typed payload validated via Zod
+  v: number; // Protocol version (1)
+  type: MessageType; // Action discriminator (e.g. STROKE_BEGIN, SHAPE_ADD)
+  msg_id: string; // Unique UUIDv4 tracking identifier
+  seq: number; // Monotonic sequence number (0 from client, &gt;0 from server)
+  ts: number; // Epoch timestamp in milliseconds
+  room: string; // 6-character room identifier
+  user_id: string; // Client UUID
+  payload: T; // Strongly-typed payload validated via Zod
 }
 </code></pre>
     <hr />
@@ -340,7 +341,7 @@ Client                                                                 Server
     <pre><code class="lang-typescript">
 class Room {
   private queue: Promise&lt;void&gt; = Promise.resolve();
-  
+
   public enqueue&lt;T&gt;(task: () =&gt; Promise&lt;T&gt; | T): Promise&lt;T&gt; {
     return new Promise&lt;T&gt;((resolve, reject) =&gt; {
       this.queue = this.queue.then(async () =&gt; {
@@ -362,7 +363,7 @@ class Room {
     <ul>
       <li>
         <strong>Monotonic Sequence (<code>seq</code>)</strong>: The server assigns a contiguous
-        integer $seq \in \{1, 2, 3 \dots\}$ to every accepted mutating operation. Clients apply
+        integer <code>seq</code> (1, 2, 3, ...) to every accepted mutating operation. Clients apply
         operations strictly in ascending sequence order.
       </li>
       <li>
@@ -392,8 +393,8 @@ class Room {
     <h2>6. Fault Tolerance &amp; Recovery Mechanisms</h2>
     <h3>6.1 Sequence Gap Detection &amp; Incremental Resync</h3>
     <p>
-      If a client encounters an incoming message where $seq &gt; lastAppliedSeq + 1$, or notices via
-      <code>PONG.roomSeq</code> that it has fallen behind:
+      If a client encounters an incoming message where <code>seq &gt; lastAppliedSeq + 1</code>, or
+      notices via <code>PONG.roomSeq</code> that it has fallen behind:
     </p>
     <p>1. The client buffers out-of-order messages.</p>
     <p>2. The client transmits <code>RESYNC_REQUEST { fromSeq: lastAppliedSeq }</code>.</p>
@@ -417,9 +418,7 @@ class Room {
       implements <strong>Isolated Per-User Undo with Compensating Operations</strong>:
     </p>
     <ul>
-      <li>
-        Alice pressing <code>Ctrl+Z</code> undoes <em>only</em> operations originated by Alice.
-      </li>
+      <li>Alice pressing <code>Ctrl+Z</code> undoes _only_ operations originated by Alice.</li>
       <li>
         Undo emits a forward-sequenced compensating operation (<code>UNDO</code>) referencing the
         target <code>op_id</code>.
@@ -512,7 +511,10 @@ class Room {
     </ul>
     <h3>8.4 Using the Drawing Tools</h3>
     <ul>
-      <li><strong>Select (<code>V</code>)</strong>: Move, resize, and delete existing objects.</li>
+      <li>
+        <strong>Select (<code>V</code> / <code>Esc</code>)</strong>: Move, resize, double-click to
+        edit text, and delete existing objects.
+      </li>
       <li>
         <strong>Pen (<code>P</code>)</strong>: Freehand drawing with smooth anti-aliased calligraphy
         strokes.
@@ -522,23 +524,38 @@ class Room {
       </li>
       <li>
         <strong
-          >Shapes (<code>S</code> / <code>R</code> / <code>O</code> / <code>L</code> /
-          <code>A</code>)</strong
-        >: Draw Rectangles, Ellipses, Lines, and Arrows.
-      </li>
-      <li><strong>Text Box (<code>T</code>)</strong>: Place resizable multiline text blocks.</li>
-      <li><strong>Sticky Note (<code>N</code>)</strong>: Colored brainstorming cards.</li>
-      <li>
-        <strong>Image (<code>I</code>)</strong>: Insert local images (PNG/JPEG) with chunked network
-        transfer.
+          >Shapes (<code>R</code> / <code>O</code> / <code>N</code> / <code>L</code> /
+          <code>X</code> / <code>C</code>)</strong
+        >: Draw Rectangles (<code>R</code>) and Ellipses (<code>O</code>) with outline and fill
+        colors plus centered inline text, Straight Lines (<code>N</code>), Directional Arrows
+        (<code>L</code>), and Smart Orthogonal Connectors (<code>X</code> / <code>C</code>).
       </li>
       <li>
-        <strong>Laser Pointer</strong>: Temporary glowing pointer for highlighting areas during
-        presentations.
+        <strong>Text Box (<code>T</code>)</strong>: Place resizable multiline text blocks and type
+        immediately.
+      </li>
+      <li>
+        <strong>Sticky Note (<code>S</code>)</strong>: Colored brainstorming cards with instant
+        inline editing.
+      </li>
+      <li>
+        <strong>Image (<code>...</code> menu)</strong>: Insert local images (PNG/JPEG/WebP) with
+        chunked network transfer.
+      </li>
+      <li>
+        <strong>Laser Pointer (<code>K</code>)</strong>: Smooth synchronized glowing pointer for
+        highlighting areas during presentations.
+      </li>
+      <li>
+        <strong>Board Search, Saves &amp; Shortcuts (<code>Ctrl+F</code> / <code>?</code>)</strong>:
+        Find text on the canvas (<code>Ctrl+F</code>), pick saved snapshots from
+        <strong>Load</strong> / <code>...</code>, or open the full shortcut reference
+        (<code>?</code>).
       </li>
       <li>
         <strong>Canvas Navigation</strong>: Hold <code>Spacebar</code> + Drag (or Middle Mouse Drag)
-        to Pan; <code>Ctrl</code> + Scroll to Zoom.
+        to Pan; <code>Ctrl</code> + Scroll or bottom-right <code>-</code> / <code>100%</code> /
+        <code>+</code> controls to Zoom.
       </li>
     </ul>
     <h3>8.5 Group Chat &amp; Collaboration</h3>
@@ -557,7 +574,7 @@ class Room {
     <h3>9.1 Automated Test Suite</h3>
     <p>
       The codebase is validated by
-      <strong>175 automated unit and integration tests across 26 test suites</strong>:
+      <strong>184 automated unit and integration tests across 26 test suites</strong>:
     </p>
     <ul>
       <li>
@@ -599,11 +616,12 @@ class Room {
     <h2>10. Conclusion</h2>
     <p>
       The LAN-Based Multi-User Collaborative Whiteboard fulfills all core and advanced
-      specifications outlined in the Computer Networks Lab Project. By building our own binary
-      framing protocol over raw TCP sockets, executing mutations through a serialized room event
-      queue, implementing isolated per-user undo/redo semantics, and enforcing strict role-based
-      access control, we demonstrated that modern, fluid collaborative software can be engineered
-      without reliance on cloud infrastructure or proprietary networking frameworks.
+      specifications outlined for the <strong>CS3004 — Computer Networks Laboratory</strong> course
+      project. By building our own binary framing protocol over raw TCP sockets, executing mutations
+      through a serialized room event queue, implementing isolated per-user undo/redo semantics, and
+      enforcing strict role-based access control, we demonstrated that modern, fluid collaborative
+      software can be engineered without reliance on cloud infrastructure or proprietary networking
+      frameworks.
     </p>
   </body>
 </html>

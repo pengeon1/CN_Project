@@ -1,5 +1,7 @@
 # LAN Collaborative Whiteboard Protocol Specification (v1)
 
+**Course**: CS3004 — Computer Networks Laboratory
+
 This document specifies the wire protocol, binary framing, message envelope, sequence ordering, consistency model, and error recovery mechanisms for the LAN-Based Multi-User Collaborative Whiteboard application.
 
 ---
@@ -111,7 +113,7 @@ Initiates the handshake upon establishing a TCP socket connection.
   "room": "",
   "user_id": "",
   "payload": {
-    "clientVersion": "0.1.0",
+    "clientVersion": "1.0.0",
     "suggestedUsername": "Alice"
   }
 }
@@ -1161,7 +1163,7 @@ Everything above runs over TCP. The one exception is **server discovery**, which
 
 ```json
 { "magic": "CN-WHITEBOARD", "v": 1, "type": "PROBE" }
-{ "magic": "CN-WHITEBOARD", "v": 1, "type": "ANNOUNCE", "name": "lab-pc", "port": 4000, "rooms": 2, "appVersion": "0.1.0" }
+{ "magic": "CN-WHITEBOARD", "v": 1, "type": "ANNOUNCE", "name": "lab-pc", "port": 4000, "rooms": 2, "appVersion": "1.0.0" }
 ```
 
 **Safety properties**

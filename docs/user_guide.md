@@ -1,5 +1,7 @@
 # LAN Collaborative Whiteboard - User Guide & Operator Manual
 
+**Course**: CS3004 — Computer Networks Laboratory
+
 Welcome to the **LAN-Based Multi-User Collaborative Whiteboard**. This comprehensive user manual guides system administrators, facilitators, and collaborative participants through installing, configuring, running, and using the application across local area networks without internet connectivity.
 
 ---
@@ -104,10 +106,10 @@ To allow incoming TCP connections from other LAN devices:
 
 Install and open the client app on your operating system:
 
-- **Windows**: Run `LAN-Whiteboard-Setup.exe` (or the standalone `LAN-Whiteboard-portable.exe`).
-  - _SmartScreen Note_: If Windows displays _"Windows protected your PC"_, click **More info** $\rightarrow$ **Run anyway** (standard for unsigned lab binaries).
-- **macOS**: Open `LAN-Whiteboard.dmg`, drag the app to _Applications_, and right-click $\rightarrow$ **Open**.
-- **Linux**: Run `LAN-Whiteboard.AppImage` (`chmod +x` may be required).
+- **Windows**: Run `LAN-Whiteboard-1.0.0-win-x64-nsis.exe` (or the standalone `LAN-Whiteboard-1.0.0-win-x64-portable.exe`).
+  - _SmartScreen Note_: If Windows displays _"Windows protected your PC"_, click **More info** -> **Run anyway** (standard for unsigned CS3004 lab binaries).
+- **macOS**: Open `LAN-Whiteboard-1.0.0-mac-arm64.dmg` (Apple Silicon) or `LAN-Whiteboard-1.0.0-mac-x64.dmg` (Intel), drag the app to _Applications_, and right-click -> **Open**.
+- **Linux**: Run `LAN-Whiteboard-1.0.0-linux-x64.AppImage` (`chmod +x` may be required; pass `--appimage-extract-and-run` if FUSE is unavailable).
 
 ### 3.2 Connect Dialog: Automatic Discovery & Manual Connect
 
@@ -159,9 +161,9 @@ Upon launching the application, the **Connect Dialog** appears:
 
 Click the prominent blue **Share** button in the Top Header Bar:
 
-- Displays Server LAN IP, Port, and Room Code.
-- Provides one-click **Copy Room Code** and **Copy Invite Link** buttons.
-- Shows QR code / quick reference for team members.
+- Automatically resolves non-loopback Server LAN IPv4 addresses (with a multi-interface selector if the host has multiple adapters), alongside the Port and 6-character Room Code.
+- Optionally reveals and copies the room Password for protected sessions (with a visibility toggle).
+- Provides one-click copy buttons for LAN IP/Host, Room Code, Password, and **Copy All** invite details for team members.
 
 ### 4.4 User Roles & Permissions
 
@@ -210,26 +212,27 @@ The interface follows modern design aesthetics inspired by Figma and FigJam:
 
 ### 5.1 Left Floating Toolbar
 
-- **Select Tool (`V`)**: Click any object on the canvas to select, drag to reposition, use corner handles to resize, or press `Delete`/`Backspace` to remove.
+- **Select Tool (`V` / `Esc`)**: Click any object on the canvas to select, drag to reposition, use corner handles to resize, double-click shapes or text to edit inline, or press `Delete`/`Backspace` to remove.
 - **Pen Tool (`P`)**: Real-time freehand drawing powered by `perfect-freehand`. Renders pressure-sensitive, anti-aliased calligraphy strokes with zero jitter.
 - **Eraser Tool (`E`)**: Precise object-level eraser. Drag over any stroke or shape to delete it with automatic hit-testing.
-- **Shape Tool (`S` / `R` / `O`)**: Click to insert geometric primitives:
-  - **Rectangle**: Box with optional solid or translucent fill.
-  - **Ellipse / Circle**: Smooth curves with adjustable stroke and border color.
-  - **Line (`L`) & Arrow (`A`)**: Connectors and directional annotation arrows.
+- **Geometric Shapes**: Draw customizable shapes with independent outline and fill colors plus centered inline text editing:
+  - **Rectangle (`R`)**: Box with customizable stroke and fill colors plus centered inline text.
+  - **Ellipse (`O`)**: Circle/oval with customizable stroke and fill colors plus centered inline text.
+  - **Line (`N`) & Arrow (`L`)**: Straight dividers and directional annotation arrows.
+  - **Smart Connector (`X` / `C`)**: Orthogonal elbow connector routing automatically between shapes/objects.
 - **Text Box (`T`)**: Click anywhere on the canvas to place an editable text block. Supports multiline notes with customizable font size, bold, and alignment.
-- **Sticky Note (`N`)**: Colorful digital sticky notes with integrated text editing, ideal for brainstorming and agile retrospectives.
-- **Image Insertion (`I`)**: Insert local PNG, JPEG, or WebP images. Images are automatically compressed, divided into chunked TCP frames, and synced across all peers.
-- **Laser Pointer**: Ephemeral glowing pointer for highlighting canvas regions during presentations without leaving permanent strokes.
+- **Sticky Note (`S`)**: Colorful digital sticky notes with integrated inline text editing, ideal for brainstorming and agile retrospectives.
+- **Image Insertion (`...` menu)**: Insert local PNG, JPEG, or WebP images. Images are automatically compressed, divided into chunked TCP frames, and synced across all peers.
+- **Laser Pointer (`K`)**: Smooth synchronized glowing pointer for highlighting canvas regions during presentations without leaving permanent strokes.
+- **Find & Shortcuts (`Ctrl+F` / `?`)**: Search text across canvas objects (`Ctrl+F`) or open the full interactive keyboard shortcuts reference (`?`).
 
 ### 5.2 Floating Property Bar
 
 When any tool or object is active, a floating property bar appears at the bottom center:
 
-- **Color Swatches**: 12 curated vibrant and dark color presets plus custom hex selection.
+- **Stroke & Fill Colors**: Preset swatches plus custom hex selection for stroke/text color and shape fill colors (including transparent no-fill).
 - **Stroke Width**: Adjustable slider from 1px to 24px.
-- **Fill Toggle**: Switch between outlined shapes and solid filled shapes.
-- **Text Styling**: Font size (Small, Medium, Large, Huge), Bold, Italic, and Text Alignment.
+- **Text Styling**: Font size (Small, Medium, Large, Huge), Bold, Italic, and centered inline text inside shapes.
 
 ### 5.3 Canvas Navigation (Pan & Zoom)
 

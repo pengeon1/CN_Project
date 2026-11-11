@@ -1,5 +1,7 @@
 # Packaging, Releases and First-Run Guide
 
+Developed for **CS3004 — Computer Networks Laboratory**.
+
 The whiteboard ships as two standalone programs that need **no Node.js install and no internet**:
 
 | Program    | What it is                                         | Built with         | Output (in `release/`)                       |
@@ -31,7 +33,7 @@ npm run smoke:server -- release/server/whiteboard-server-linux-x64   # verify an
 ## What CI does
 
 - **`ci.yml`**: on every push/PR to `main`, format check, lint, tests and build on Windows, Linux and macOS. On pushes to `main` (and manual runs) a second `package` job builds the server executable, **smoke-tests it** (starts it, completes a TCP `HELLO`/`AUTH_OK` handshake and a UDP discovery probe), builds the client installers, and uploads both as artifacts (kept 14 days) from the run's _Artifacts_ section.
-- **`release.yml`**: pushing a tag `vX.Y.Z` runs the same on all three OSes, then a final job downloads every artifact and publishes **one GitHub release** with generated notes.
+- **`release.yml`**: pushing a tag `vX.Y.Z` runs the same build and verification matrix across all three OSes, then a final `publish` job downloads every artifact, generates `SHA256SUMS.txt` checksums, renders the curated release write-up from `.github/release-body.md`, and publishes **one GitHub Release** with both the structured overview and auto-generated commit/PR notes.
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0     # publishes a release
@@ -61,7 +63,7 @@ The **client** only makes outgoing connections, so it normally triggers no firew
 
 ## Unsigned apps: SmartScreen and Gatekeeper
 
-These builds are **not code-signed** (signing needs paid certificates), so operating systems warn on first launch. This is expected for a lab build.
+These builds are **not code-signed** (signing needs paid certificates), so operating systems warn on first launch. This is expected for a CS3004 course lab build.
 
 - **Windows SmartScreen** ("Windows protected your PC"): click **More info → Run anyway**. For the portable `.exe` or the server, the same prompt appears once per downloaded file. Right-click the file → _Properties_ → tick **Unblock** to avoid it.
 - **macOS Gatekeeper** ("cannot be opened because the developer cannot be verified" / "is damaged"):

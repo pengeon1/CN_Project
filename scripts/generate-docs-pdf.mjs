@@ -1,9 +1,9 @@
 /**
- * @fileoverview Generates docs/technical_documentation.pdf using Chromium/Edge headless print-to-pdf.
- * Zero external downloads required: uses the pre-installed system Edge/Chrome browser.
+ * @fileoverview Generates docs/technical_documentation.pdf using Chromium/Edge or local Electron print-to-pdf.
  */
 
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -264,23 +264,123 @@ const htmlTemplate = (body) => `<!DOCTYPE html>
 </body>
 </html>`;
 
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function findBrowserBinary() {
   const candidatePaths = [
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/microsoft-edge',
   ];
 
   for (const p of candidatePaths) {
-    try {
-      await fs.access(p);
+    if (await fileExists(p)) {
       return p;
+    }
+  }
+
+  for (const cmd of ['google-chrome', 'chromium', 'chromium-browser', 'microsoft-edge']) {
+    try {
+      const locator = process.platform === 'win32' ? 'where' : 'which';
+      const { stdout } = await execFileAsync(locator, [cmd]);
+      const resolved = stdout.trim().split(/\r?\n/)[0];
+      if (resolved && (await fileExists(resolved))) {
+        return resolved;
+      }
     } catch {
-      // try next
+      // try next command
     }
   }
   return null;
+}
+
+async function findElectronBinary() {
+  const rel =
+    process.platform === 'win32'
+      ? path.join('node_modules', 'electron', 'dist', 'electron.exe')
+      : process.platform === 'darwin'
+        ? path.join(
+            'node_modules',
+            'electron',
+            'dist',
+            'Electron.app',
+            'Contents',
+            'MacOS',
+            'Electron',
+          )
+        : path.join('node_modules', 'electron', 'dist', 'electron');
+  const candidate = path.join(rootDir, rel);
+  return (await fileExists(candidate)) ? candidate : null;
+}
+
+async function renderPdfWithElectron(electronPath) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cn-docs-pdf-'));
+  const runnerPath = path.join(tempDir, 'print-pdf.cjs');
+  const runnerSource = [
+    "const fs = require('node:fs');",
+    "const { app, BrowserWindow } = require('electron');",
+    'const [htmlFile, outPdf] = process.argv.slice(-2);',
+    'app.disableHardwareAcceleration();',
+    'app.whenReady().then(async () => {',
+    '  try {',
+    '    const win = new BrowserWindow({',
+    '      show: false,',
+    '      width: 1024,',
+    '      height: 1440,',
+    '      webPreferences: { javascript: true },',
+    '    });',
+    '    await win.loadFile(htmlFile);',
+    "    await win.webContents.executeJavaScript('document.fonts.ready');",
+    '    const pdfBuffer = await win.webContents.printToPDF({',
+    '      printBackground: true,',
+    '      preferCSSPageSize: true,',
+    "      pageSize: 'A4',",
+    '      margins: { top: 0.7, bottom: 0.7, left: 0.6, right: 0.6 },',
+    '    });',
+    '    fs.writeFileSync(outPdf, pdfBuffer);',
+    '    app.exit(0);',
+    '  } catch (err) {',
+    '    console.error(err);',
+    '    app.exit(1);',
+    '  }',
+    '});',
+  ].join('\n');
+
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+
+  try {
+    await fs.writeFile(runnerPath, runnerSource, 'utf8');
+    await execFileAsync(
+      electronPath,
+      [
+        '--no-sandbox',
+        '--disable-gpu',
+        '--user-data-dir=' + path.join(tempDir, 'profile'),
+        runnerPath,
+        htmlPath,
+        pdfPath,
+      ],
+      { env },
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function main() {
@@ -293,34 +393,35 @@ async function main() {
   console.log(`[PDF Generator] HTML rendered: ${htmlPath}`);
 
   const browserPath = await findBrowserBinary();
-  if (!browserPath) {
-    console.warn(
-      '[PDF Generator] No Chromium/Edge browser binary found; HTML saved to docs/technical_documentation.html.',
-    );
-    return;
-  }
+  if (browserPath) {
+    console.log(`[PDF Generator] Using browser: ${browserPath}`);
+    const tempUserDataDir = path.join(rootDir, '.temp-browser-data');
+    const args = [
+      '--headless',
+      '--disable-gpu',
+      '--no-sandbox',
+      '--disable-extensions',
+      `--user-data-dir=${tempUserDataDir}`,
+      '--no-pdf-header-footer',
+      `--print-to-pdf=${pdfPath}`,
+      `file:///${htmlPath.replace(/\\/g, '/')}`,
+    ];
 
-  console.log(`[PDF Generator] Using browser: ${browserPath}`);
-  const tempUserDataDir = path.join(rootDir, '.temp-browser-data');
-  const args = [
-    '--headless',
-    '--disable-gpu',
-    '--no-sandbox',
-    '--disable-extensions',
-    `--user-data-dir=${tempUserDataDir}`,
-    '--no-pdf-header-footer',
-    `--print-to-pdf=${pdfPath}`,
-    `file:///${htmlPath.replace(/\\/g, '/')}`,
-  ];
-
-  try {
-    await execFileAsync(browserPath, args);
-  } finally {
     try {
-      await fs.rm(tempUserDataDir, { recursive: true, force: true });
-    } catch {
-      // ignore cleanup error
+      await execFileAsync(browserPath, args);
+    } finally {
+      await fs.rm(tempUserDataDir, { recursive: true, force: true }).catch(() => {});
     }
+  } else {
+    const electronPath = await findElectronBinary();
+    if (!electronPath) {
+      console.warn(
+        '[PDF Generator] No Chromium/Edge/Electron binary found; HTML saved to docs/technical_documentation.html.',
+      );
+      return;
+    }
+    console.log(`[PDF Generator] Using Electron fallback: ${electronPath}`);
+    await renderPdfWithElectron(electronPath);
   }
 
   const stats = await fs.stat(pdfPath);

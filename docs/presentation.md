@@ -16,7 +16,7 @@ This document provides a slide-by-slide script, visual diagram references, and a
 ### Slide 1: Title & Team Introduction
 
 - **Slide Title**: LAN-Based Multi-User Real-Time Collaborative Whiteboard
-- **Subtitle**: Computer Networks Laboratory Course Project | Fall 2026
+- **Subtitle**: CS3004 — Computer Networks Laboratory Course Project | 2026
 - **Content Elements**:
   - Project Title & High-level Description.
   - Team Member Names, Student IDs, and Designated Technical Roles:
@@ -205,7 +205,7 @@ This document provides a slide-by-slide script, visual diagram references, and a
     - Custom HTML5 2D Canvas engine with `perfect-freehand` for smooth, calligraphic pen strokes.
     - Layered rendering: committed static layer + active live drawing layer.
     - Sub-pixel anti-aliasing and `devicePixelRatio` scaling for retina/high-DPI screens.
-  - **Tools**: Pen, Object Eraser, Geometric Shapes (Rectangle, Ellipse, Line, Arrow), Text Boxes, Sticky Notes, Laser Pointer.
+  - **Tools**: Pen, Object Eraser, Geometric Shapes (Rectangle, Ellipse with fill color & centered text, Line, Arrow, Smart Orthogonal Connector), Text Boxes, Sticky Notes, Image Insertion, Smooth Laser Pointer, Board Search (`Ctrl+F`), Keyboard Shortcuts (`?`), and Saved Board Picker.
 - **Visual Assets**: High-resolution screenshot of the whiteboard interface annotated with callouts.
 - **Speaker Notes**:
   > "For the user interface, we followed modern design patterns inspired by Figma and FigJam. The canvas uses a layered HTML5 Canvas 2D engine with the perfect-freehand algorithm for smooth strokes. We built rich shape tools, resizable text boxes, and colored sticky notes with full interactive handles."
@@ -254,14 +254,14 @@ This document provides a slide-by-slide script, visual diagram references, and a
 - **Slide Title**: Rigorous Testing & Lossy Network Simulation
 - **Content Elements**:
   - **Complete Automated Test Suite**:
-    - **175 unit and integration tests** passing across 26 test files with 100% pass rate.
+    - **184 unit and integration tests** passing across 26 test files with 100% pass rate.
     - Tests real raw TCP socket communication, framing, Zod validation, and role security.
   - **Lossy TCP Proxy Test Harness** (`tests/lossy-proxy.ts`):
     - Injects artificial latency (50-200ms), packet duplication, random drops, and reordering.
     - Verifies that multiple concurrent drawing clients converge to an identical canvas despite network instability.
-- **Visual Assets**: Terminal screenshot showing Vitest reporting 26 passed test files and 175 passing tests.
+- **Visual Assets**: Terminal screenshot showing Vitest reporting 26 passed test files and 184 passing tests.
 - **Speaker Notes**:
-  > "To verify our protocol's robustness, we wrote 175 automated tests that run against real TCP sockets. We even built an adversarial lossy proxy harness that injects simulated network delays, duplicated frames, and dropped connections. In every test, all clients converged to the exact same canvas state."
+  > "To verify our protocol's robustness, we wrote 184 automated tests that run against real TCP sockets. We even built an adversarial lossy proxy harness that injects simulated network delays, duplicated frames, and dropped connections. In every test, all clients converged to the exact same canvas state."
 
 ---
 
@@ -318,12 +318,12 @@ To ensure the presentation visually demonstrates all implemented functionality, 
 | **SS-5**  | **Text Box & Sticky Notes**             | Canvas                   | Multiline text annotations and sticky note cards showing brainstorming ideas.                                  |
 | **SS-6**  | **Group Chat & Unread Notifications**   | Right Panel              | Chat bubbles with avatars, timestamps, system join alerts, message input field, and unread badge.              |
 | **SS-7**  | **Participants List & Role Management** | Right Panel (Tab 2)      | List of users showing Host, Editor, Viewer tags, and Host action menu (Kick, Change Role).                     |
-| **SS-8**  | **Share Modal**                         | Top Bar "Share" Button   | Room code, server LAN IP address, port, and "Copy Link" buttons.                                               |
+| **SS-8**  | **Share Modal**                         | Top Bar "Share" Button   | Auto-detected Server LAN IP selector, port, room code, optional password toggle/copy, and "Copy All" button.   |
 | **SS-9**  | **Presentation Mode & Laser Pointer**   | Canvas during Presenting | Viewport indicator and glowing laser pointer trail fading across the canvas.                                   |
 | **SS-10** | **Version History Modal**               | Top Bar Clock Icon       | List of named snapshot milestones with "Create Snapshot" and "Restore" buttons.                                |
 | **SS-11** | **Reconnection Banner**                 | Top of Screen            | Amber banner _"Connection lost. Reconnecting to whiteboard..."_ during simulated network drop.                 |
 | **SS-12** | **Terminal Server Startup**             | Server Console           | Server logging LAN IPv4 addresses, active port, and UDP discovery readiness.                                   |
-| **SS-13** | **Automated Test Results**              | Terminal Console         | Vitest output showing 26 test files passed, 175 passed tests.                                                  |
+| **SS-13** | **Automated Test Results**              | Terminal Console         | Vitest output showing 26 test files passed, 184 passed tests.                                                  |
 
 ---
 

@@ -2,6 +2,7 @@
   "name": "@cn-whiteboard/server",
   "version": "1.0.0",
   "private": true,
+  "description": "CS3004 Computer Networks — Standalone TCP/UDP LAN collaborative whiteboard server",
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {

@@ -77,11 +77,31 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist-release
           merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist-release
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Render release notes body
+        run: |
+          node -e '
+            const fs = require("fs");
+            const tag = process.env.GITHUB_REF_NAME || "";
+            const version = tag.replace(/^v/, "");
+            const tpl = fs.readFileSync(".github/release-body.md", "utf8");
+            const out = tpl.replaceAll("{{TAG}}", tag).replaceAll("{{VERSION}}", version);
+            fs.writeFileSync("release-body.md", out, "utf8");
+          '
 
       - name: List files
         run: ls -lh dist-release
@@ -89,5 +109,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          name: LAN Collaborative Whiteboard ${{ github.ref_name }}
+          body_path: release-body.md
           files: dist-release/*
           generate_release_notes: true

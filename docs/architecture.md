@@ -1,8 +1,11 @@
 # System Architecture Specification
 
+**Course**: CS3004 — Computer Networks Laboratory  
+**Project**: LAN-Based Multi-User Collaborative Whiteboard
+
 ## 1. Executive Summary & Core Objectives
 
-The **LAN-Based Multi-User Collaborative Whiteboard** is an offline-first, real-time shared workspace engineered to operate with zero dependencies on external cloud services, third-party synchronization APIs (such as Firebase), or high-level abstraction frameworks (such as WebSockets, Socket.IO, or HTTP servers).
+The **LAN-Based Multi-User Collaborative Whiteboard** is an offline-first, real-time shared workspace engineered for **CS3004 (Computer Networks)** to operate with zero dependencies on external cloud services, third-party synchronization APIs (such as Firebase), or high-level abstraction frameworks (such as WebSockets, Socket.IO, or HTTP servers).
 
 All essential network communications operate over raw **Transmission Control Protocol (TCP)** sockets using native operating system socket facilities provided by Node.js (`net` module). LAN service discovery operates over **User Datagram Protocol (UDP)** broadcast sockets (`dgram` module).
 

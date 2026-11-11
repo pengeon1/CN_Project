@@ -1,8 +1,8 @@
 # LAN-Based Multi-User Collaborative Whiteboard: Technical Documentation & User Guide
 
-**Course**: Computer Networks Laboratory (CS304)  
+**Course**: Computer Networks Laboratory (CS3004)  
 **Academic Year**: 2026-2027  
-**Document Revision**: 1.0.0 (Release Candidate)  
+**Document Revision**: 1.0.0  
 **Deliverable**: Comprehensive Technical Report & User Guide
 
 ---
@@ -23,7 +23,7 @@ The objective of this project is to develop a robust, cross-platform collaborati
 
 1. Functions seamlessly on a Local Area Network with **the internet connection completely disabled**.
 2. Restricts all essential communication between the central server and clients to **raw TCP/IP socket programming**.
-3. Provides an interactive, low-latency graphical user interface supporting freehand drawing, stroke erasing, geometric shapes, editable text, sticky notes, image insertion, and integrated group chat.
+3. Provides an interactive, low-latency graphical user interface supporting freehand drawing, stroke erasing, geometric shapes (with outline/fill colors and centered inline text), smart orthogonal connectors, editable text, sticky notes, image insertion, smooth laser pointer, board search, and integrated group chat.
 4. Maintains strong eventual consistency across multiple concurrent participants without state corruption.
 5. Survives common network faults, including connection loss, delayed packets, and abrupt host disconnects.
 6. Ships as standalone cross-platform executables for Windows, macOS, and Linux requiring no external runtime installation.
@@ -94,7 +94,7 @@ TCP does not enforce message boundaries. To prevent message fragmentation and co
 ```
 
 - **Maximum Frame Size**: Capped at `8,388,608` bytes (8 MB) to prevent buffer-exhaustion attacks.
-- **Stateful Framing Decoder**: Accumulates incoming chunks. Once 4 header bytes are available, it extracts payload length $L$. It buffers bytes until $4 + L$ bytes exist, slices the frame, parses JSON, and immediately loops to decode any concatenated frames packed in the same TCP segment.
+- **Stateful Framing Decoder**: Accumulates incoming chunks. Once 4 header bytes are available, it extracts payload length `L`. It buffers bytes until `4 + L` bytes exist, slices the frame, parses JSON, and immediately loops to decode any concatenated frames packed in the same TCP segment.
 
 ### 3.3 Universal Message Envelope
 
@@ -170,7 +170,7 @@ All state-modifying operations (drawing strokes, moving objects, clearing canvas
 
 ### 5.2 Monotonic Sequencing & Idempotency
 
-- **Monotonic Sequence (`seq`)**: The server assigns a contiguous integer $seq \in \{1, 2, 3 \dots\}$ to every accepted mutating operation. Clients apply operations strictly in ascending sequence order.
+- **Monotonic Sequence (`seq`)**: The server assigns a contiguous integer `seq` (1, 2, 3, ...) to every accepted mutating operation. Clients apply operations strictly in ascending sequence order.
 - **Idempotency (`op_id`)**: Every client mutation carries a unique UUIDv4 `op_id`. The server maintains a deduplication cache; duplicate transmissions resulting from network retries are acknowledged without re-executing or creating duplicate objects.
 
 ### 5.3 Optimistic Rendering & Point Batching
@@ -185,7 +185,7 @@ All state-modifying operations (drawing strokes, moving objects, clearing canvas
 
 ### 6.1 Sequence Gap Detection & Incremental Resync
 
-If a client encounters an incoming message where $seq > lastAppliedSeq + 1$, or notices via `PONG.roomSeq` that it has fallen behind:
+If a client encounters an incoming message where `seq > lastAppliedSeq + 1`, or notices via `PONG.roomSeq` that it has fallen behind:
 
 1. The client buffers out-of-order messages.
 2. The client transmits `RESYNC_REQUEST { fromSeq: lastAppliedSeq }`.
@@ -258,15 +258,16 @@ The server displays its LAN IP addresses on startup:
 
 ### 8.4 Using the Drawing Tools
 
-- **Select (`V`)**: Move, resize, and delete existing objects.
+- **Select (`V` / `Esc`)**: Move, resize, double-click to edit text, and delete existing objects.
 - **Pen (`P`)**: Freehand drawing with smooth anti-aliased calligraphy strokes.
 - **Eraser (`E`)**: Object-level eraser with collision hit-testing.
-- **Shapes (`S` / `R` / `O` / `L` / `A`)**: Draw Rectangles, Ellipses, Lines, and Arrows.
-- **Text Box (`T`)**: Place resizable multiline text blocks.
-- **Sticky Note (`N`)**: Colored brainstorming cards.
-- **Image (`I`)**: Insert local images (PNG/JPEG) with chunked network transfer.
-- **Laser Pointer**: Temporary glowing pointer for highlighting areas during presentations.
-- **Canvas Navigation**: Hold `Spacebar` + Drag (or Middle Mouse Drag) to Pan; `Ctrl` + Scroll to Zoom.
+- **Shapes (`R` / `O` / `N` / `L` / `X` / `C`)**: Draw Rectangles (`R`) and Ellipses (`O`) with outline and fill colors plus centered inline text, Straight Lines (`N`), Directional Arrows (`L`), and Smart Orthogonal Connectors (`X` / `C`).
+- **Text Box (`T`)**: Place resizable multiline text blocks and type immediately.
+- **Sticky Note (`S`)**: Colored brainstorming cards with instant inline editing.
+- **Image (`...` menu)**: Insert local images (PNG/JPEG/WebP) with chunked network transfer.
+- **Laser Pointer (`K`)**: Smooth synchronized glowing pointer for highlighting areas during presentations.
+- **Board Search, Saves & Shortcuts (`Ctrl+F` / `?`)**: Find text on the canvas (`Ctrl+F`), pick saved snapshots from **Load** / `...`, or open the full shortcut reference (`?`).
+- **Canvas Navigation**: Hold `Spacebar` + Drag (or Middle Mouse Drag) to Pan; `Ctrl` + Scroll or bottom-right `-` / `100%` / `+` controls to Zoom.
 
 ### 8.5 Group Chat & Collaboration
 
@@ -279,7 +280,7 @@ The server displays its LAN IP addresses on startup:
 
 ### 9.1 Automated Test Suite
 
-The codebase is validated by **175 automated unit and integration tests across 26 test suites**:
+The codebase is validated by **184 automated unit and integration tests across 26 test suites**:
 
 - **Framing & Protocol**: Tested against stream fragmentation, frame coalescing, 8 MB oversize rejection, and malformed JSON recovery.
 - **Multi-Client Concurrency**: Real TCP sockets concurrently generating strokes, shapes, and chat messages without state divergence.
@@ -300,4 +301,4 @@ Using our custom TCP lossy proxy harness (`tests/lossy-proxy.ts`), we subjected 
 
 ## 10. Conclusion
 
-The LAN-Based Multi-User Collaborative Whiteboard fulfills all core and advanced specifications outlined in the Computer Networks Lab Project. By building our own binary framing protocol over raw TCP sockets, executing mutations through a serialized room event queue, implementing isolated per-user undo/redo semantics, and enforcing strict role-based access control, we demonstrated that modern, fluid collaborative software can be engineered without reliance on cloud infrastructure or proprietary networking frameworks.
+The LAN-Based Multi-User Collaborative Whiteboard fulfills all core and advanced specifications outlined for the **CS3004 — Computer Networks Laboratory** course project. By building our own binary framing protocol over raw TCP sockets, executing mutations through a serialized room event queue, implementing isolated per-user undo/redo semantics, and enforcing strict role-based access control, we demonstrated that modern, fluid collaborative software can be engineered without reliance on cloud infrastructure or proprietary networking frameworks.

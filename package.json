@@ -2,7 +2,7 @@
   "name": "cn-whiteboard-monorepo",
   "version": "1.0.0",
   "private": true,
-  "description": "CS3004 Computer Networks — LAN-based, multi-user, real-time collaborative whiteboard",
+  "description": "CS3004 Computer Networks Practice — LAN-based, multi-user, real-time collaborative whiteboard",
   "author": "CS3004 CN Whiteboard Project Team",
   "repository": {
     "type": "git",

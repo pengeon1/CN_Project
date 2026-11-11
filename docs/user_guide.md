@@ -1,6 +1,6 @@
 # LAN Collaborative Whiteboard - User Guide & Operator Manual
 
-**Course**: CS3004 — Computer Networks Laboratory
+**Course**: CS3004 — Computer Networks Practice
 
 Welcome to the **LAN-Based Multi-User Collaborative Whiteboard**. This comprehensive user manual guides system administrators, facilitators, and collaborative participants through installing, configuring, running, and using the application across local area networks without internet connectivity.
 

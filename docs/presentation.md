@@ -1,6 +1,6 @@
 # Presentation (PPT) Slide-by-Slide Plan & Video Guide
 
-This document provides a slide-by-slide script, visual diagram references, and an exact list of application screenshots to capture for the project presentation and explanation video required by the **Computer Networks Lab Project Specifications**.
+This document provides a slide-by-slide script, visual diagram references, and an exact list of application screenshots to capture for the project presentation and explanation video required by the **CS3004 — Computer Networks Practice** course specifications.
 
 ---
 
@@ -16,7 +16,7 @@ This document provides a slide-by-slide script, visual diagram references, and a
 ### Slide 1: Title & Team Introduction
 
 - **Slide Title**: LAN-Based Multi-User Real-Time Collaborative Whiteboard
-- **Subtitle**: CS3004 — Computer Networks Laboratory Course Project | 2026
+- **Subtitle**: CS3004 — Computer Networks Practice Course Project | 2026
 - **Content Elements**:
   - Project Title & High-level Description.
   - Team Member Names, Student IDs, and Designated Technical Roles:
@@ -26,7 +26,7 @@ This document provides a slide-by-slide script, visual diagram references, and a
     - _Member 4_: Client Engine, Canvas Graphics Rendering & User Interface.
 - **Visual Assets**: Application logo, university insignia, and a hero screenshot of the multi-user whiteboard canvas.
 - **Speaker Notes**:
-  > "Hello everyone. Today our team is presenting our Computer Networks lab project: a LAN-based, multi-user real-time collaborative whiteboard. Our system enables multiple participants across a local network to draw, annotate, chat, and collaborate simultaneously on a digital canvas without any internet connection, cloud services, or external web frameworks."
+  > "Hello everyone. Today our team is presenting our CS3004 Computer Networks Practice project: a LAN-based, multi-user real-time collaborative whiteboard. Our system enables multiple participants across a local network to draw, annotate, chat, and collaborate simultaneously on a digital canvas without any internet connection, cloud services, or external web frameworks."
 
 ---
 

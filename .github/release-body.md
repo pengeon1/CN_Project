@@ -1,6 +1,6 @@
 # LAN Collaborative Whiteboard {{TAG}}
 
-**Course Project:** CS3004 — Computer Networks Laboratory  
+**Course Project:** CS3004 — Computer Networks Practice  
 **Architecture:** Offline-first LAN collaborative whiteboard built over raw TCP sockets (`net`) and UDP broadcast discovery (`dgram`) with no cloud backend, WebSockets, or HTTP frameworks.
 
 All release binaries are self-contained and require **no Node.js installation** and **no internet access** at runtime.

@@ -1,6 +1,6 @@
 # LAN-Based Multi-User Collaborative Whiteboard: Technical Documentation & User Guide
 
-**Course**: Computer Networks Laboratory (CS3004)  
+**Course**: Computer Networks Practice (CS3004)  
 **Academic Year**: 2026-2027  
 **Document Revision**: 1.0.0  
 **Deliverable**: Comprehensive Technical Report & User Guide
@@ -301,4 +301,4 @@ Using our custom TCP lossy proxy harness (`tests/lossy-proxy.ts`), we subjected 
 
 ## 10. Conclusion
 
-The LAN-Based Multi-User Collaborative Whiteboard fulfills all core and advanced specifications outlined for the **CS3004 — Computer Networks Laboratory** course project. By building our own binary framing protocol over raw TCP sockets, executing mutations through a serialized room event queue, implementing isolated per-user undo/redo semantics, and enforcing strict role-based access control, we demonstrated that modern, fluid collaborative software can be engineered without reliance on cloud infrastructure or proprietary networking frameworks.
+The LAN-Based Multi-User Collaborative Whiteboard fulfills all core and advanced specifications outlined for the **CS3004 — Computer Networks Practice** course project. By building our own binary framing protocol over raw TCP sockets, executing mutations through a serialized room event queue, implementing isolated per-user undo/redo semantics, and enforcing strict role-based access control, we demonstrated that modern, fluid collaborative software can be engineered without reliance on cloud infrastructure or proprietary networking frameworks.

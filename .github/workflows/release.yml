@@ -112,4 +112,4 @@ jobs:
           name: LAN Collaborative Whiteboard ${{ github.ref_name }}
           body_path: release-body.md
           files: dist-release/*
-          generate_release_notes: true
+          generate_release_notes: false

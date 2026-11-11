@@ -1,11 +1,11 @@
 # LAN Multi-User Real-Time Collaborative Whiteboard
 
-[![Course: CS3004](https://img.shields.io/badge/Course-CS3004_Computer_Networks-blue.svg)](#)
+[![Course: CS3004](https://img.shields.io/badge/Course-CS3004_Computer_Networks_Practice-blue.svg)](#)
 [![CI](https://github.com/pengeon1/CN_Project/actions/workflows/ci.yml/badge.svg)](https://github.com/pengeon1/CN_Project/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/pengeon1/CN_Project)](https://github.com/pengeon1/CN_Project/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A standalone, high-performance, real-time collaborative whiteboard built from scratch for Local Area Networks (LAN). Developed for **CS3004 — Computer Networks Laboratory**, it operates strictly over raw **TCP/IP socket programming** (`net`) and **UDP LAN discovery** (`dgram`) without external cloud infrastructure, WebSockets, or HTTP frameworks, ensuring 100% functionality with internet connectivity completely disabled.
+A standalone, high-performance, real-time collaborative whiteboard built from scratch for Local Area Networks (LAN). Developed for **CS3004 — Computer Networks Practice**, it operates strictly over raw **TCP/IP socket programming** (`net`) and **UDP LAN discovery** (`dgram`) without external cloud infrastructure, WebSockets, or HTTP frameworks, ensuring 100% functionality with internet connectivity completely disabled.
 
 ---
 

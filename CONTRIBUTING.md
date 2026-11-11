@@ -1,6 +1,6 @@
 # Contributing to LAN Collaborative Whiteboard
 
-Welcome! This repository hosts our **CS3004 Computer Networks** laboratory course project: a LAN-based, multi-user, real-time collaborative whiteboard built with raw TCP socket programming (Node.js `net` module), Electron, React, and TypeScript.
+Welcome! This repository hosts our **CS3004 — Computer Networks Practice** course project: a LAN-based, multi-user, real-time collaborative whiteboard built with raw TCP socket programming (Node.js `net` module), Electron, React, and TypeScript.
 
 To ensure consistency, code quality, and smooth team collaboration, please adhere to the following workflow and engineering guidelines.
 

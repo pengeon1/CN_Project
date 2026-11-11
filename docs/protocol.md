@@ -1,6 +1,6 @@
 # LAN Collaborative Whiteboard Protocol Specification (v1)
 
-**Course**: CS3004 — Computer Networks Laboratory
+**Course**: CS3004 — Computer Networks Practice
 
 This document specifies the wire protocol, binary framing, message envelope, sequence ordering, consistency model, and error recovery mechanisms for the LAN-Based Multi-User Collaborative Whiteboard application.
 

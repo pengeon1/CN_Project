@@ -1,0 +1,78 @@
+graph TB
+    subgraph LAN["Local Area Network (Offline / Zero Internet)"]
+        subgraph ServerNode["Whiteboard TCP Server (Node.js 20+ Runtime)"]
+            TCPListener["TCP Server (net.Server) :4000<br/>4-byte Big-Endian Framing Decoder"]
+            UDPDiscovery["UDP Discovery Service (dgram) :45454<br/>Responds to LAN Broadcast Probes"]
+            SessionMgr["Session Manager<br/>Client Heartbeats & Disconnect Detection"]
+            RoomMgr["Room Manager<br/>Room Creation, Authentication, Role Checks"]
+            
+            subgraph RoomState["Active Room Instance (Serialized Event Queue)"]
+                OpQueue["Room FIFO Task Queue<br/>Single-threaded Event Loop Execution"]
+                SeqGen["Monotonic Sequence Generator (seq++)"]
+                StateEngine["Whiteboard State Engine<br/>Materialized Object Map & Ops Log"]
+                Compactor["Log Compactor<br/>Compacts history every N ops"]
+                UndoRedoEngine["Per-User Undo/Redo Stacks<br/>Compensating Undo Operations"]
+                AssetStore["Chunked Image Asset Store"]
+            end
+            
+            Persistence["Room Persistence Engine<br/>Debounced Atomic JSON Writer (fs.rename)"]
+            DiskStorage[("Local Disk (--data-dir)<br/>{ROOM_CODE}.json")]
+        end
+
+        subgraph ClientNodeA["Client A (Host - Electron Desktop App)"]
+            subgraph MainProcessA["Electron Main Process (Node.js)"]
+                TCPClientA["TCP Client Manager (net.Socket)<br/>Reliable Channel, Outbox Queue, Exponential Backoff"]
+                DiscoveryClientA["UDP Discovery Prober (dgram)"]
+                IPCHandlerA["Typed IPC Main Dispatcher"]
+            end
+            PreloadBridgeA["ContextIsolation Preload Bridge<br/>Typed window.electronAPI"]
+            subgraph RendererA["React 18 Renderer Process"]
+                StoreA["Zustand State Store<br/>Local Optimistic State & Server Reconciliation"]
+                CanvasA["HTML5 Canvas 2D Engine<br/>perfect-freehand & Dirty Rect Redraw"]
+                UIA["Figma-style UI Components<br/>TopBar, LeftToolbar, PropertyBar, RightPanel"]
+            end
+        end
+
+        subgraph ClientNodeB["Client B (Editor - Electron Desktop App)"]
+            subgraph MainProcessB["Electron Main Process (Node.js)"]
+                TCPClientB["TCP Client Manager (net.Socket)<br/>Reliable Channel, Outbox Queue, Exponential Backoff"]
+                IPCHandlerB["Typed IPC Main Dispatcher"]
+            end
+            PreloadBridgeB["ContextIsolation Preload Bridge<br/>Typed window.electronAPI"]
+            subgraph RendererB["React 18 Renderer Process"]
+                StoreB["Zustand State Store"]
+                CanvasB["HTML5 Canvas 2D Engine"]
+                UIB["Figma-style UI Components"]
+            end
+        end
+    end
+
+    %% Network Connections
+    TCPClientA <== "Raw TCP Stream (Length-prefixed JSON)" ==> TCPListener
+    TCPClientB <== "Raw TCP Stream (Length-prefixed JSON)" ==> TCPListener
+    DiscoveryClientA -. "UDP Broadcast :45454" .-> UDPDiscovery
+
+    %% Server Internal Wiring
+    TCPListener --> SessionMgr
+    SessionMgr --> RoomMgr
+    RoomMgr --> OpQueue
+    OpQueue --> SeqGen
+    SeqGen --> StateEngine
+    StateEngine --> Compactor
+    StateEngine --> UndoRedoEngine
+    StateEngine --> AssetStore
+    StateEngine --> Persistence
+    Persistence --> DiskStorage
+
+    %% Client Internal Wiring
+    TCPClientA <--> IPCHandlerA
+    IPCHandlerA <--> PreloadBridgeA
+    PreloadBridgeA <--> StoreA
+    StoreA <--> CanvasA
+    StoreA <--> UIA
+
+    TCPClientB <--> IPCHandlerB
+    IPCHandlerB <--> PreloadBridgeB
+    PreloadBridgeB <--> StoreB
+    StoreB <--> CanvasB
+    StoreB <--> UIB

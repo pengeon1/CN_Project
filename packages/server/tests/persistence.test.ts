@@ -139,8 +139,19 @@ describe('Room persistence', () => {
     );
     await room.enqueue(() => room.applyStrokeEnd(generateUuid(), strokeId));
 
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    const persisted = JSON.parse(await fs.readFile(path.join(dir, `${roomCode}.json`), 'utf8')) as {
+    const filePath = path.join(dir, `${roomCode}.json`);
+    let persistedContent: string | null = null;
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      try {
+        persistedContent = await fs.readFile(filePath, 'utf8');
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    expect(persistedContent).not.toBeNull();
+    const persisted = JSON.parse(persistedContent!) as {
       objects: Record<string, unknown>;
     };
     expect(persisted.objects[strokeId]).toBeDefined();

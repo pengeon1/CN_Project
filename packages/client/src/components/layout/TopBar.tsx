@@ -41,7 +41,6 @@ export const TopBar: React.FC = () => {
     disconnectFromServer,
     toggleTheme,
     requestSaveState,
-    requestLoadState,
     exportBoard,
     sendPermissionChange,
     presentation,

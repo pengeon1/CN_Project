@@ -14,7 +14,6 @@ import {
   History,
   RotateCcw,
   Sparkles,
-  Upload,
   X,
 } from 'lucide-react';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';

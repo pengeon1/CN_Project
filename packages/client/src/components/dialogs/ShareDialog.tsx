@@ -183,7 +183,11 @@ export const ShareDialog: React.FC = () => {
                     title={showPassword ? 'Hide password' : 'Show password'}
                     className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
                   >
-                    {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    {showPassword ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
                   </button>
                   <button
                     type="button"

@@ -1503,6 +1503,7 @@ export class WhiteboardServer {
    */
   public async close(): Promise<void> {
     this.isClosing = true;
+    this.roomManager.dispose();
     await this.discovery?.stop();
     this.discovery = null;
 

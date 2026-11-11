@@ -22,13 +22,22 @@ function run(args: string[]) {
   });
 }
 
+function waitForExit(child: ReturnType<typeof run>): Promise<number | null> {
+  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+  return new Promise<number | null>((resolve, reject) => {
+    child.once('close', resolve);
+    child.once('error', reject);
+  });
+}
+
 async function collect(
   child: ReturnType<typeof run>,
 ): Promise<{ out: string; code: number | null }> {
   let out = '';
+  const exited = waitForExit(child);
   child.stdout?.on('data', (d) => (out += d));
   child.stderr?.on('data', (d) => (out += d));
-  const code = await new Promise<number | null>((r) => child.on('close', r));
+  const code = await exited;
   return { out, code };
 }
 
@@ -58,9 +67,11 @@ describe('server CLI entry', () => {
       '--data-dir',
       dir,
     ]);
+    const exited = waitForExit(child);
     try {
       let connected = false;
-      for (let i = 0; i < 50 && !connected; i++) {
+      for (let i = 0; i < 100 && !connected; i++) {
+        if (child.exitCode !== null || child.signalCode !== null) break;
         connected = await new Promise<boolean>((resolve) => {
           const s = net.createConnection({ host: '127.0.0.1', port }, () => {
             s.destroy();
@@ -72,8 +83,21 @@ describe('server CLI entry', () => {
       }
       expect(connected).toBe(true);
     } finally {
-      child.kill('SIGTERM');
-      await new Promise((r) => child.on('close', r));
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGTERM');
+        const forceKillTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) {
+            child.kill('SIGKILL');
+          }
+        }, 3000);
+        try {
+          await exited;
+        } finally {
+          clearTimeout(forceKillTimer);
+        }
+      } else {
+        await exited.catch(() => undefined);
+      }
       await fs.rm(dir, { recursive: true, force: true });
     }
   }, 20000);

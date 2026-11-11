@@ -321,4 +321,14 @@ export class RoomManager {
     }
     return count;
   }
+
+  /**
+   * Clears any pending room cleanup timers during server shutdown.
+   */
+  public dispose(): void {
+    for (const timer of this.emptyRoomTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.emptyRoomTimers.clear();
+  }
 }

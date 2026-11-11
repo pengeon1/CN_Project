@@ -87,25 +87,31 @@ describe('discovery over UDP', () => {
   it('ignores non-probe datagrams and rate limits a flooding sender', async () => {
     const r = await start(4000, 0, 'quiet');
     const sock = dgram.createSocket('udp4');
-    let replies = 0;
-    sock.on('message', () => replies++);
-    await new Promise<void>((res) => sock.bind(0, res));
-    const send = (b: Buffer) => sock.send(b, r.port!, '127.0.0.1');
-    send(Buffer.from('not a probe'));
-    for (let i = 0; i < 30; i++) send(encodeDiscoveryProbe());
-    await new Promise((res) => setTimeout(res, 300));
-    sock.close();
-    expect(replies).toBeGreaterThan(0);
-    expect(replies).toBeLessThanOrEqual(5);
+    try {
+      let replies = 0;
+      sock.on('message', () => replies++);
+      await new Promise<void>((res) => sock.bind(0, res));
+      const send = (b: Buffer) => sock.send(b, r.port!, '127.0.0.1');
+      send(Buffer.from('not a probe'));
+      for (let i = 0; i < 30; i++) send(encodeDiscoveryProbe());
+      await new Promise((res) => setTimeout(res, 300));
+      expect(replies).toBeGreaterThan(0);
+      expect(replies).toBeLessThanOrEqual(5);
+    } finally {
+      sock.close();
+    }
   });
 
   it('survives its port being taken: start() reports false instead of throwing', async () => {
     const blocker = dgram.createSocket({ type: 'udp4', reuseAddr: false });
     await new Promise<void>((res) => blocker.bind(0, '0.0.0.0', res));
-    const taken = blocker.address().port;
-    const r = new DiscoveryResponder({ port: taken, tcpPort: 1, getRoomCount: () => 0 });
-    expect(await r.start()).toBe(false);
-    blocker.close();
+    try {
+      const taken = blocker.address().port;
+      const r = new DiscoveryResponder({ port: taken, tcpPort: 1, getRoomCount: () => 0 });
+      expect(await r.start()).toBe(false);
+    } finally {
+      blocker.close();
+    }
   });
 
   it('is configured from the command line', () => {

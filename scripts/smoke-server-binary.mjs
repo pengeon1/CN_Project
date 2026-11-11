@@ -117,7 +117,15 @@ if (announce?.type !== 'ANNOUNCE' || announce.port !== tcpPort) {
 }
 
 child.kill();
-await sleep(200);
-rmSync(dataDir, { recursive: true, force: true });
+await Promise.race([
+  new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else child.once('close', resolve);
+  }),
+  sleep(2000).then(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  }),
+]);
+rmSync(dataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 console.log(`SMOKE OK: ${exe} handshakes over TCP and answers discovery`);
 process.exit(0);

@@ -68,7 +68,15 @@ export function isEditableElement(target: EventTarget | null): boolean {
 }
 
 export function useKeyboardShortcuts(): void {
-  const { setActiveTool, undoLastAction, redoLastAction, setSearchOpen } = useWhiteboardStore();
+  const {
+    setActiveTool,
+    undoLastAction,
+    redoLastAction,
+    setSearchOpen,
+    zoomIn,
+    zoomOut,
+    resetView,
+  } = useWhiteboardStore();
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -85,6 +93,21 @@ export function useKeyboardShortcuts(): void {
         if (key === 'f') {
           e.preventDefault();
           setSearchOpen(true);
+          return;
+        }
+        if (key === '=' || key === '+') {
+          e.preventDefault();
+          zoomIn();
+          return;
+        }
+        if (key === '-' || key === '_') {
+          e.preventDefault();
+          zoomOut();
+          return;
+        }
+        if (key === '0') {
+          e.preventDefault();
+          resetView();
           return;
         }
         if (key === 'z') {
@@ -125,5 +148,5 @@ export function useKeyboardShortcuts(): void {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [redoLastAction, setActiveTool, undoLastAction]);
+  }, [redoLastAction, resetView, setActiveTool, setSearchOpen, undoLastAction, zoomIn, zoomOut]);
 }

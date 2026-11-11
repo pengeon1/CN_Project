@@ -266,6 +266,9 @@ export const WhiteboardCanvas: React.FC = () => {
     panX,
     panY,
     setZoom,
+    zoomBy,
+    zoomIn,
+    zoomOut,
     adjustPan,
     resetView,
     isDarkTheme,
@@ -1119,13 +1122,16 @@ export const WhiteboardCanvas: React.FC = () => {
     setIsPanning(false);
   };
 
-  // Zoom via Ctrl/Cmd + Wheel or two-finger trackpad pinch
+  // Zoom via Ctrl/Cmd + Wheel or two-finger trackpad pinch (centered at cursor)
   const handleWheel = (e: React.WheelEvent) => {
     if (following) return; // the presenter controls the view
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
+      const rect = containerRef.current?.getBoundingClientRect();
+      const cx = rect ? e.clientX - rect.left : e.clientX;
+      const cy = rect ? e.clientY - rect.top : e.clientY;
       const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      setZoom((prev) => prev * zoomFactor);
+      zoomBy(zoomFactor, cx, cy);
     } else {
       adjustPan(-e.deltaX / zoom, -e.deltaY / zoom);
     }
@@ -1243,30 +1249,50 @@ export const WhiteboardCanvas: React.FC = () => {
       )}
 
       {/* Floating Bottom-Right Zoom Control (never overlaps PropertyBar) */}
-      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-xl border border-slate-700/80 bg-slate-900/95 px-2 py-1 shadow-xl backdrop-blur-xl select-none text-slate-200">
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-xl border border-slate-700/80 bg-slate-900/95 px-2 py-1 shadow-xl backdrop-blur-xl select-none text-slate-200"
+      >
         <button
+          type="button"
           disabled={following}
-          onClick={() => setZoom((prev) => prev * 0.85)}
-          title="Zoom out"
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition"
+          onClick={(e) => {
+            e.stopPropagation();
+            zoomOut();
+          }}
+          title="Zoom out (Ctrl + -)"
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-40 transition"
         >
           <Minus className="h-3 w-3" />
         </button>
 
         <button
+          type="button"
           disabled={following}
-          onClick={() => resetView()}
-          title="Reset zoom to 100%"
-          className="px-1.5 text-xs font-mono font-semibold text-slate-200 hover:text-blue-400 transition"
+          onClick={(e) => {
+            e.stopPropagation();
+            resetView();
+          }}
+          title="Reset zoom to 100% (Ctrl + 0)"
+          className="px-1.5 text-xs font-mono font-semibold text-slate-200 hover:text-blue-400 disabled:opacity-40 transition"
         >
           {Math.round(zoom * 100)}%
         </button>
 
         <button
+          type="button"
           disabled={following}
-          onClick={() => setZoom((prev) => prev * 1.15)}
-          title="Zoom in"
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition"
+          onClick={(e) => {
+            e.stopPropagation();
+            zoomIn();
+          }}
+          title="Zoom in (Ctrl + +)"
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-40 transition"
         >
           <Plus className="h-3 w-3" />
         </button>
@@ -1274,10 +1300,14 @@ export const WhiteboardCanvas: React.FC = () => {
         <div className="h-3.5 w-[1px] bg-slate-800 mx-0.5" />
 
         <button
+          type="button"
           disabled={following}
-          onClick={() => resetView()}
+          onClick={(e) => {
+            e.stopPropagation();
+            resetView();
+          }}
           title="Reset View"
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition"
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-40 transition"
         >
           <RotateCcw className="h-3 w-3" />
         </button>

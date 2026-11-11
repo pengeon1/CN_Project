@@ -164,6 +164,9 @@ export interface WhiteboardState {
   setActiveTool: (tool: CanvasTool) => void;
   setToolProps: (props: Partial<ToolProperties>) => void;
   setZoom: (zoom: number | ((prev: number) => number)) => void;
+  zoomBy: (factor: number, cx?: number, cy?: number) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
   setPan: (panX: number, panY: number) => void;
   adjustPan: (deltaX: number, deltaY: number) => void;
   resetView: () => void;
@@ -442,6 +445,44 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       const clamped = Math.min(Math.max(nextZoom, 0.1), 5.0);
       return { zoom: Math.round(clamped * 100) / 100 };
     });
+  },
+
+  zoomBy: (factor, cx, cy) => {
+    set((state) => {
+      const oldZ = state.zoom;
+      const rawNew = oldZ * factor;
+      const clamped = Math.min(Math.max(rawNew, 0.1), 5.0);
+      const roundedZ = Math.round(clamped * 100) / 100;
+      if (roundedZ === oldZ) return state;
+
+      if (cx !== undefined && cy !== undefined) {
+        const deltaFactor = 1 / roundedZ - 1 / oldZ;
+        return {
+          zoom: roundedZ,
+          panX: Math.round((state.panX + cx * deltaFactor) * 100) / 100,
+          panY: Math.round((state.panY + cy * deltaFactor) * 100) / 100,
+        };
+      }
+
+      const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+      const viewportH = typeof window !== 'undefined' ? window.innerHeight : 800;
+      const midX = viewportW / 2;
+      const midY = viewportH / 2;
+      const deltaFactor = 1 / roundedZ - 1 / oldZ;
+      return {
+        zoom: roundedZ,
+        panX: Math.round((state.panX + midX * deltaFactor) * 100) / 100,
+        panY: Math.round((state.panY + midY * deltaFactor) * 100) / 100,
+      };
+    });
+  },
+
+  zoomIn: () => {
+    get().zoomBy(1.2);
+  },
+
+  zoomOut: () => {
+    get().zoomBy(1 / 1.2);
   },
 
   setPan: (panX, panY) => {

@@ -1,0 +1,43 @@
+# electron-builder configuration (Phase 16).
+# The app is fully bundled (vite for the renderer, esbuild for main/preload), so only these
+# build outputs are packaged; no node_modules are shipped.
+appId: com.cn.lanwhiteboard
+productName: LAN Whiteboard
+directories:
+  output: ../../release/client
+  buildResources: build
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: LAN-Whiteboard-${version}-win-x64-${target}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  artifactName: LAN-Whiteboard-${version}-mac-${arch}.${ext}
+  # Unsigned build: no Apple developer certificate is assumed (see docs/packaging.md).
+  identity: null
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Office
+  artifactName: LAN-Whiteboard-${version}-linux-x64.${ext}

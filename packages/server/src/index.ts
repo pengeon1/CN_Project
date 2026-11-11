@@ -44,8 +44,11 @@ export async function startServer(configOverride?: Partial<ServerConfig>): Promi
   return { server, port, host };
 }
 
-// Execute standalone when invoked directly from CLI
-if (process.argv[1]?.endsWith('index.ts') || process.argv[1]?.endsWith('index.js')) {
+/**
+ * Starts the server for command-line use and shuts it down cleanly on SIGINT/SIGTERM.
+ * Shared by the dev entry (this file run directly) and the packaged executable (cli.ts).
+ */
+export function runCli(): void {
   startServer()
     .then(({ server }) => {
       const shutdown = async (signal: string) => {
@@ -61,4 +64,10 @@ if (process.argv[1]?.endsWith('index.ts') || process.argv[1]?.endsWith('index.js
       logger.error('Fatal startup error:', err);
       process.exit(1);
     });
+}
+
+// Execute standalone when invoked directly (e.g. `tsx src/index.ts`). The packaged executable
+// cannot rely on this check because its argv[1] is a virtual path, so it uses cli.ts instead.
+if (process.argv[1]?.endsWith('index.ts') || process.argv[1]?.endsWith('index.js')) {
+  runCli();
 }

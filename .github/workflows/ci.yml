@@ -45,3 +45,64 @@ jobs:
 
       - name: Build packages
         run: npm run build
+
+  # Packaging is slow, so it runs on pushes to main and on demand, not on every PR.
+  package:
+    name: Package (${{ matrix.os }})
+    needs: validate
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            server_exe: release/server/whiteboard-server-linux-x64
+            client_glob: release/client/*.AppImage
+          - os: windows-latest
+            server_exe: release/server/whiteboard-server-win-x64.exe
+            client_glob: release/client/*.exe
+          - os: macos-latest
+            server_exe: release/server/whiteboard-server-macos-arm64
+            client_glob: |
+              release/client/*.dmg
+              release/client/*.zip
+    env:
+      # No Apple/Windows signing certificates are used; see docs/packaging.md.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build standalone server executable
+        run: npm run package:server
+
+      - name: Smoke-test the server executable (TCP handshake + LAN discovery)
+        run: node scripts/smoke-server-binary.mjs ${{ matrix.server_exe }}
+
+      - name: Build desktop client installers
+        run: npm run package:client
+
+      - name: Upload server executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.os }}
+          path: release/server/*
+          retention-days: 14
+
+      - name: Upload client installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.os }}
+          path: ${{ matrix.client_glob }}
+          retention-days: 14

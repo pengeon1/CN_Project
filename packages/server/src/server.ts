@@ -54,6 +54,7 @@ import {
   type StrokePointsPayload,
   validatePayload,
 } from '@cn-whiteboard/common';
+import { DiscoveryResponder } from './discovery.js';
 import { Logger } from './logger.js';
 import { RoomManager } from './room-manager.js';
 import type { Room } from './room.js';
@@ -72,6 +73,11 @@ export interface ServerOptions {
    * Silence after which a client is dropped. Defaults to HEARTBEAT_TIMEOUT_MS (15s).
    */
   heartbeatTimeoutMs?: number;
+  /**
+   * UDP port for LAN discovery. Omit (undefined) to disable discovery entirely, which is the
+   * default so embedded/test servers never open a UDP socket; the CLI enables it.
+   */
+  discoveryPort?: number;
 }
 
 export class WhiteboardServer {
@@ -88,15 +94,23 @@ export class WhiteboardServer {
   private hasRestoredRooms = false;
   private logger = new Logger('TCPServer');
   private isClosing = false;
+  private discovery: DiscoveryResponder | null = null;
+  private readonly discoveryPort: number | undefined;
 
   constructor(options: ServerOptions) {
     this.host = options.host;
     this.port = options.port;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
+    this.discoveryPort = options.discoveryPort;
     this.persistence = new RoomPersistence(options.dataDir ?? path.resolve(process.cwd(), 'data'));
     this.roomManager = new RoomManager((room) => this.persistence.scheduleSave(room));
     this.server = net.createServer((socket) => this.handleNewConnection(socket));
+  }
+
+  /** UDP port the discovery responder is bound to, or null when discovery is off. */
+  public get discoveryBoundPort(): number | null {
+    return this.discovery?.port ?? null;
   }
 
   /**
@@ -1470,6 +1484,15 @@ export class WhiteboardServer {
           }
         }
 
+        if (this.discoveryPort !== undefined) {
+          this.discovery = new DiscoveryResponder({
+            port: this.discoveryPort,
+            tcpPort: boundPort,
+            getRoomCount: () => this.roomManager.roomCount,
+          });
+          void this.discovery.start();
+        }
+
         resolve({ port: boundPort, host: boundHost });
       });
     });
@@ -1480,6 +1503,8 @@ export class WhiteboardServer {
    */
   public async close(): Promise<void> {
     this.isClosing = true;
+    await this.discovery?.stop();
+    this.discovery = null;
 
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);

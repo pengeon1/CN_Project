@@ -35,6 +35,14 @@ export interface ConnectionStatusEvent {
   retryInMs?: number;
 }
 
+/** A server that answered a LAN discovery probe. `host` is the address it replied from. */
+export interface DiscoveredServer {
+  host: string;
+  port: number;
+  name: string;
+  rooms: number;
+}
+
 /**
  * Outcome of writing a validated room snapshot from the desktop save dialog.
  */
@@ -57,6 +65,8 @@ export interface ElectronWhiteboardAPI {
   onStatus: (callback: (status: ConnectionStatusEvent) => void) => () => void;
   exportBoard: (snapshot: RoomSnapshot) => Promise<ExportBoardResult>;
   getLanAddresses?: () => Promise<string[]>;
+  /** Broadcasts a UDP probe and resolves with the servers that answered (never rejects). */
+  discoverServers?: () => Promise<DiscoveredServer[]>;
 }
 
 declare global {

@@ -40,6 +40,8 @@ const api: ElectronWhiteboardAPI = {
   },
 
   getLanAddresses: () => ipcRenderer.invoke('net:get-lan-ips'),
+
+  discoverServers: () => ipcRenderer.invoke('net:discover'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

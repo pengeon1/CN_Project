@@ -16,6 +16,7 @@ import * as fs from 'node:fs/promises';
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { RoomSnapshotSchema, type MessageEnvelope, type RoomSnapshot } from '@cn-whiteboard/common';
 import type { ConnectOptions, ExportBoardResult } from '../src/types/ipc.js';
+import { scanForServers } from './discovery.js';
 import { MainTcpClient, type TcpClientSink } from './tcp-client.js';
 
 // Optimize Chromium rasterization for crisp subpixel font rendering and high-DPI displays
@@ -128,6 +129,8 @@ ipcMain.handle('tcp:send', async (_event, envelope: MessageEnvelope) => {
   if (!tcpClient) return false;
   return tcpClient.send(envelope);
 });
+
+ipcMain.handle('net:discover', async () => scanForServers());
 
 ipcMain.handle('net:get-lan-ips', async () => {
   return getLanAddresses();

@@ -12,8 +12,10 @@ import {
   LogIn,
   Network,
   PlusCircle,
+  Radar,
   X,
 } from 'lucide-react';
+import type { DiscoveredServer } from '../../types/ipc.js';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 
 export const ConnectDialog: React.FC = () => {
@@ -36,6 +38,22 @@ export const ConnectDialog: React.FC = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [allowNameChanges, setAllowNameChanges] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  /** null until the first scan finishes, so "nothing found" is not shown prematurely. */
+  const [servers, setServers] = useState<DiscoveredServer[] | null>(null);
+
+  const scanLan = async () => {
+    const discover = window.electronAPI?.discoverServers;
+    if (!discover || scanning) return;
+    setScanning(true);
+    try {
+      setServers(await discover());
+    } catch {
+      setServers([]);
+    } finally {
+      setScanning(false);
+    }
+  };
 
   if (!connectModalOpen) {
     return null;
@@ -112,6 +130,54 @@ export const ConnectDialog: React.FC = () => {
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
+          {/* LAN discovery (manual IP entry below always remains available) */}
+          <div>
+            <button
+              type="button"
+              onClick={() => void scanLan()}
+              disabled={scanning || !window.electronAPI?.discoverServers}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-blue-500 disabled:opacity-60"
+            >
+              {scanning ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Radar className="h-3.5 w-3.5" />
+              )}
+              {scanning ? 'Scanning the network…' : 'Find servers on this network'}
+            </button>
+            {servers !== null && (
+              <ul className="mt-2 space-y-1">
+                {servers.length === 0 && (
+                  <li className="px-1 text-[11px] text-slate-400">
+                    No servers answered. Check the server is running on the same network, or type
+                    its IP below.
+                  </li>
+                )}
+                {servers.map((s) => (
+                  <li key={`${s.host}:${s.port}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHost(s.host);
+                        setPort(String(s.port));
+                      }}
+                      className={`flex w-full items-center justify-between rounded-lg border px-3 py-1.5 text-left text-xs transition ${
+                        host === s.host && port === String(s.port)
+                          ? 'border-blue-500 bg-blue-600/15'
+                          : 'border-slate-800 bg-slate-950/40 hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="font-semibold">{s.name}</span>
+                      <span className="text-slate-400">
+                        {s.host}:{s.port} · {s.rooms} room{s.rooms === 1 ? '' : 's'}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           {/* LAN Connection Details */}
           <div className="grid grid-cols-3 gap-2">
             <div className="col-span-2">

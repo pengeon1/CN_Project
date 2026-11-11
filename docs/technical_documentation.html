@@ -1,0 +1,609 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LAN Whiteboard Technical Documentation</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 18mm 15mm 18mm 15mm;
+      }
+      body {
+        font-family:
+          'Segoe UI',
+          -apple-system,
+          BlinkMacSystemFont,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        color: #1e293b;
+        line-height: 1.6;
+        font-size: 10.5pt;
+        margin: 0;
+        padding: 0;
+      }
+      h1 {
+        font-size: 20pt;
+        border-bottom: 2px solid #2563eb;
+        padding-bottom: 6px;
+        margin-top: 0;
+        color: #0f172a;
+      }
+      h2 {
+        font-size: 15pt;
+        border-bottom: 1px solid #cbd5e1;
+        padding-bottom: 4px;
+        margin-top: 22pt;
+        color: #1e3a8a;
+        page-break-after: avoid;
+      }
+      h3 {
+        font-size: 12pt;
+        margin-top: 14pt;
+        color: #1e293b;
+        page-break-after: avoid;
+      }
+      p,
+      li {
+        color: #334155;
+      }
+      code {
+        background-color: #f1f5f9;
+        color: #0f172a;
+        padding: 1px 4px;
+        border-radius: 4px;
+        font-family: 'Consolas', 'Courier New', monospace;
+        font-size: 9pt;
+        border: 1px solid #e2e8f0;
+      }
+      pre {
+        background-color: #0f172a;
+        color: #f8fafc;
+        padding: 10px 14px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-family: 'Consolas', 'Courier New', monospace;
+        font-size: 8.5pt;
+        line-height: 1.4;
+        page-break-inside: avoid;
+      }
+      pre code {
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        border: none;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12pt 0;
+        font-size: 9.5pt;
+        page-break-inside: avoid;
+      }
+      th,
+      td {
+        border: 1px solid #cbd5e1;
+        padding: 5pt 8pt;
+        text-align: left;
+      }
+      th {
+        background-color: #f1f5f9;
+        font-weight: 600;
+        color: #0f172a;
+      }
+      tr:nth-child(even) td {
+        background-color: #f8fafc;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #e2e8f0;
+        margin: 18pt 0;
+      }
+      ul {
+        padding-left: 18px;
+      }
+      li {
+        margin-bottom: 3pt;
+      }
+      strong {
+        color: #0f172a;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>LAN-Based Multi-User Collaborative Whiteboard: Technical Documentation &amp; User Guide</h1>
+    <p><strong>Course</strong>: Computer Networks Laboratory (CS304)</p>
+    <p><strong>Academic Year</strong>: 2026-2027</p>
+    <p><strong>Document Revision</strong>: 1.0.0 (Release Candidate)</p>
+    <p><strong>Deliverable</strong>: Comprehensive Technical Report &amp; User Guide</p>
+    <hr />
+    <h2>Abstract</h2>
+    <p>
+      This technical report details the design, mathematical modeling, implementation, and empirical
+      verification of a standalone, multi-user real-time collaborative whiteboard engineered
+      exclusively for Local Area Networks (LAN). The system operates strictly over raw Transmission
+      Control Protocol (TCP) sockets and User Datagram Protocol (UDP) broadcast facilities provided
+      by the native operating system, with zero dependencies on external cloud infrastructure,
+      WebSockets, or HTTP frameworks. The report covers our custom 4-byte big-endian binary framing
+      protocol, universal JSON message envelope, serial event-loop concurrency model, optimistic
+      synchronization strategy with monotonically sequenced server reconciliation, per-user isolated
+      undo/redo semantics, heartbeat fault recovery, role-based access security, and an operator
+      user guide.
+    </p>
+    <hr />
+    <h2>1. System Overview &amp; Problem Statement</h2>
+    <h3>1.1 Problem Statement</h3>
+    <p>
+      Modern collaborative web applications almost universally depend on cloud-hosted backends,
+      third-party WebSocket gateways, and external identity providers. In restricted, air-gapped, or
+      bandwidth-constrained environments—such as university examination labs, remote industrial
+      facilities, or emergency response command posts—external connectivity is either unavailable or
+      prohibited.
+    </p>
+    <p>
+      The objective of this project is to develop a robust, cross-platform collaborative whiteboard
+      that:
+    </p>
+    <p>
+      1. Functions seamlessly on a Local Area Network with
+      <strong>the internet connection completely disabled</strong>.
+    </p>
+    <p>
+      2. Restricts all essential communication between the central server and clients to
+      <strong>raw TCP/IP socket programming</strong>.
+    </p>
+    <p>
+      3. Provides an interactive, low-latency graphical user interface supporting freehand drawing,
+      stroke erasing, geometric shapes, editable text, sticky notes, image insertion, and integrated
+      group chat.
+    </p>
+    <p>
+      4. Maintains strong eventual consistency across multiple concurrent participants without state
+      corruption.
+    </p>
+    <p>
+      5. Survives common network faults, including connection loss, delayed packets, and abrupt host
+      disconnects.
+    </p>
+    <p>
+      6. Ships as standalone cross-platform executables for Windows, macOS, and Linux requiring no
+      external runtime installation.
+    </p>
+    <hr />
+    <h2>2. System Architecture &amp; Network Layering</h2>
+    <h3>2.1 Topology</h3>
+    <p>The application implements a centralized <strong>Client-Server Architecture</strong>:</p>
+    <pre><code class="lang-text">
++---------------------------------------------------------------------------------+
+|                                TCP Central Server                               |
+|            (Node.js native 'net' module, Session &amp; Room State Engine)           |
++---------------------------------------------------------------------------------+
+       ^                                    ^                               ^
+       | Raw TCP (:4000)                    | Raw TCP (:4000)               | Raw TCP
+       | Length-prefixed JSON               | Length-prefixed JSON          |
+       v                                    v                               v
++-----------------------+        +-----------------------+        +---------------+
+| Client 1 (Host)       |        | Client 2 (Editor)     |        | Client 3 ...  |
+| Electron Main (net)   |        | Electron Main (net)   |        | (Viewer)      |
+| Preload Bridge (IPC)  |        | Preload Bridge (IPC)  |        |               |
+| React 18 Canvas UI    |        | React 18 Canvas UI    |        |               |
++-----------------------+        +-----------------------+        +---------------+
+       :                                    :
+       +........ UDP Broadcast (:45454) ....+ (Zero-Config LAN Server Discovery)
+</code></pre>
+    <h3>2.2 Component Decomposition</h3>
+    <ul>
+      <li>
+        <strong><code>packages/common</code></strong
+        >: Shared protocol definitions, 4-byte length-prefixed framing encoder and stateful stream
+        decoder, Zod schemas, domain models, and constants.
+      </li>
+      <li>
+        <strong><code>packages/server</code></strong
+        >: Native Node.js daemon. Listens on TCP port <code>4000</code>, hosts sessions and rooms,
+        sequences mutations, maintains in-memory materialized object dictionaries, manages debounced
+        atomic disk persistence, and handles UDP broadcast discovery probes on port
+        <code>45454</code>.
+      </li>
+      <li>
+        <strong><code>packages/client</code></strong
+        >: Electron desktop application:
+      </li>
+      <li>
+        <strong>Main Process (Node.js)</strong>: Manages the TCP socket connection, reliable outbox
+        buffer, automatic reconnect watchdog, and UDP discovery scanner.
+      </li>
+      <li>
+        <strong>Preload Bridge</strong>: Typed, context-isolated IPC interface
+        (<code>contextBridge</code>) preventing renderer access to raw OS primitives.
+      </li>
+      <li>
+        <strong>Renderer Process (React 18 + Vite + Tailwind CSS)</strong>: Custom HTML5 Canvas 2D
+        engine with <code>perfect-freehand</code>, Zustand reactive store, toolbars, property bars,
+        and chat sidebar.
+      </li>
+    </ul>
+    <hr />
+    <h2>3. Application-Level Message Protocol &amp; Binary Framing</h2>
+    <h3>3.1 Transport Layer Rationale: Why TCP?</h3>
+    <p>
+      The core data transport strictly uses
+      <strong>TCP (Transmission Control Protocol)</strong> rather than UDP:
+    </p>
+    <ul>
+      <li>
+        <strong>Guaranteed In-Order Delivery</strong>: Whiteboard mutations are state-altering
+        operations. Dropping or reordering an erase or shape insertion would cause divergent canvas
+        states ("ghost objects"). TCP guarantees reliable byte streams via OS-level ACKs and
+        retransmissions.
+      </li>
+      <li>
+        <strong>Flow &amp; Congestion Control</strong>: TCP sliding window dynamics prevent server
+        socket buffer exhaustion during initial snapshot synchronization.
+      </li>
+      <li>
+        <strong>Selective UDP Usage</strong>: UDP is utilized exclusively for
+        <strong>Zero-Configuration LAN Discovery</strong> (<code>dgram</code> on port
+        <code>45454</code>), where lost probes are harmlessly retransmitted by the client.
+      </li>
+    </ul>
+    <h3>3.2 Wire Framing Format</h3>
+    <p>
+      TCP does not enforce message boundaries. To prevent message fragmentation and coalescing from
+      corrupting application state, every message is prefixed by a
+      <strong>4-byte unsigned big-endian length header</strong>:
+    </p>
+    <pre><code class="lang-text">
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                 Payload Length (32-bit Big-Endian)            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+|                   UTF-8 Encoded JSON Body                     |
+|                      (Variable Length)                        |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</code></pre>
+    <ul>
+      <li>
+        <strong>Maximum Frame Size</strong>: Capped at <code>8,388,608</code> bytes (8 MB) to
+        prevent buffer-exhaustion attacks.
+      </li>
+      <li>
+        <strong>Stateful Framing Decoder</strong>: Accumulates incoming chunks. Once 4 header bytes
+        are available, it extracts payload length $L$. It buffers bytes until $4 + L$ bytes exist,
+        slices the frame, parses JSON, and immediately loops to decode any concatenated frames
+        packed in the same TCP segment.
+      </li>
+    </ul>
+    <h3>3.3 Universal Message Envelope</h3>
+    <pre><code class="lang-typescript">
+interface MessageEnvelope&lt;T = unknown&gt; {
+  v: number;        // Protocol version (1)
+  type: MessageType;// Action discriminator (e.g. STROKE_BEGIN, SHAPE_ADD)
+  msg_id: string;   // Unique UUIDv4 tracking identifier
+  seq: number;      // Monotonic sequence number (0 from client, &gt;0 from server)
+  ts: number;       // Epoch timestamp in milliseconds
+  room: string;     // 6-character room identifier
+  user_id: string;  // Client UUID
+  payload: T;       // Strongly-typed payload validated via Zod
+}
+</code></pre>
+    <hr />
+    <h2>4. Socket Communication &amp; Connection Lifecycle</h2>
+    <pre><code class="lang-text">
+Client                                                                 Server
+  |                                                                      |
+  |--- TCP SYN ---------------------------------------------------------&gt;| (Handshake)
+  |&lt;-- TCP SYN-ACK ------------------------------------------------------|
+  |--- TCP ACK ---------------------------------------------------------&gt;|
+  |                                                                      |
+  |=== Frame: HELLO { version: 1, sessionToken: null } =================&gt;|
+  |&lt;== Frame: AUTH_OK { sessionToken: "uuid", clientId: "uuid" } ========| (Session Created)
+  |                                                                      |
+  |=== Frame: CREATE_ROOM { roomName: "Lab Session", password: null } ===&gt;|
+  |&lt;== Frame: ROOM_STATE { roomCode: "7RC7H3", seq: 0, objects: {} } ====| (Host Assigned)
+  |                                                                      |
+  |    [Periodic Heartbeat every 5000ms]                                 |
+  |=== Frame: PING { msg_id: "p1" } ====================================&gt;|
+  |&lt;== Frame: PONG { msg_id: "p1", roomSeq: 42 } ========================|
+  |                                                                      |
+  |=== Frame: LEAVE_ROOM { roomCode: "7RC7H3" } =========================&gt;|
+  |&lt;== Frame: PARTICIPANT_LEFT { user_id: "uuid" } [Broadcast to Peers] =|
+</code></pre>
+    <p>
+      1. <strong>Connection Establishment</strong>: Client connects to server port
+      <code>4000</code> and issues <code>HELLO</code>. The server validates protocol version
+      <code>1</code> and allocates a unique session token.
+    </p>
+    <p>
+      2. <strong>Heartbeat Protocol</strong>: Clients transmit <code>PING</code> frames every
+      <code>5,000 ms</code>. The server responds with <code>PONG</code> containing the latest room
+      sequence number. If no data arrives from a client for <code>15,000 ms</code>, the server drops
+      the socket and broadcasts <code>PARTICIPANT_LEFT</code>.
+    </p>
+    <p>
+      3. <strong>Session Reconnection</strong>: Reconnecting clients present their existing
+      <code>sessionToken</code> in <code>HELLO</code>. The server re-binds the socket to the
+      participant without resetting permissions or allocating a duplicate identity.
+    </p>
+    <hr />
+    <h2>5. State Synchronization &amp; Concurrency Model</h2>
+    <h3>5.1 Concurrency Handling: The Serial Event Loop Queue</h3>
+    <p>
+      To prevent race conditions without the overhead of distributed locking, the server utilizes
+      Node.js's single-threaded event loop combined with a
+      <strong>Per-Room FIFO Task Queue</strong>:
+    </p>
+    <pre><code class="lang-typescript">
+class Room {
+  private queue: Promise&lt;void&gt; = Promise.resolve();
+  
+  public enqueue&lt;T&gt;(task: () =&gt; Promise&lt;T&gt; | T): Promise&lt;T&gt; {
+    return new Promise&lt;T&gt;((resolve, reject) =&gt; {
+      this.queue = this.queue.then(async () =&gt; {
+        try {
+          resolve(await task());
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+  }
+}
+</code></pre>
+    <p>
+      All state-modifying operations (drawing strokes, moving objects, clearing canvas) are enqueued
+      and processed serially.
+    </p>
+    <h3>5.2 Monotonic Sequencing &amp; Idempotency</h3>
+    <ul>
+      <li>
+        <strong>Monotonic Sequence (<code>seq</code>)</strong>: The server assigns a contiguous
+        integer $seq \in \{1, 2, 3 \dots\}$ to every accepted mutating operation. Clients apply
+        operations strictly in ascending sequence order.
+      </li>
+      <li>
+        <strong>Idempotency (<code>op_id</code>)</strong>: Every client mutation carries a unique
+        UUIDv4 <code>op_id</code>. The server maintains a deduplication cache; duplicate
+        transmissions resulting from network retries are acknowledged without re-executing or
+        creating duplicate objects.
+      </li>
+    </ul>
+    <h3>5.3 Optimistic Rendering &amp; Point Batching</h3>
+    <ul>
+      <li>
+        <strong>Optimistic UI</strong>: Freehand strokes and shapes are rendered immediately on the
+        local canvas.
+      </li>
+      <li>
+        <strong>Batching</strong>: Mouse movement points are batched at ~16–33ms intervals
+        (<code>STROKE_POINTS</code>) to minimize TCP packet overhead.
+      </li>
+      <li>
+        <strong>Server Echo Reconciliation</strong>: When the server confirms the operation with its
+        assigned <code>seq</code>, the local client reconciles its optimistic temporary state with
+        the authoritative server log.
+      </li>
+    </ul>
+    <hr />
+    <h2>6. Fault Tolerance &amp; Recovery Mechanisms</h2>
+    <h3>6.1 Sequence Gap Detection &amp; Incremental Resync</h3>
+    <p>
+      If a client encounters an incoming message where $seq &gt; lastAppliedSeq + 1$, or notices via
+      <code>PONG.roomSeq</code> that it has fallen behind:
+    </p>
+    <p>1. The client buffers out-of-order messages.</p>
+    <p>2. The client transmits <code>RESYNC_REQUEST { fromSeq: lastAppliedSeq }</code>.</p>
+    <p>
+      3. If the missing range exists in the server's operation log, the server replies with
+      <code>RESYNC_RESPONSE</code> containing the exact missing operations.
+    </p>
+    <p>
+      4. If the gap exceeds the server's log history, the server transmits a full
+      <code>ROOM_STATE</code> snapshot, immediately restoring convergence.
+    </p>
+    <h3>6.2 Client Offline Outbox</h3>
+    <p>
+      Mutations generated while a client is temporarily disconnected are held in a local FIFO outbox
+      buffer. Upon reconnection and successful gap resync, the outbox drains to the server, ensuring
+      zero lost work during network interruptions.
+    </p>
+    <h3>6.3 Isolated Multi-User Undo/Redo</h3>
+    <p>
+      Unlike single-user applications where undo pops the global history stack, our system
+      implements <strong>Isolated Per-User Undo with Compensating Operations</strong>:
+    </p>
+    <ul>
+      <li>
+        Alice pressing <code>Ctrl+Z</code> undoes <em>only</em> operations originated by Alice.
+      </li>
+      <li>
+        Undo emits a forward-sequenced compensating operation (<code>UNDO</code>) referencing the
+        target <code>op_id</code>.
+      </li>
+      <li>
+        If Bob has already modified or deleted Alice's object, the server recognizes the conflict
+        and returns an informational no-op, preventing retroactive corruption of Bob's work.
+      </li>
+    </ul>
+    <hr />
+    <h2>7. Security &amp; Access Control</h2>
+    <p>1. <strong>Role-Based Access Control (RBAC)</strong>:</p>
+    <ul>
+      <li>
+        <strong><code>HOST</code></strong
+        >: Full control (clear canvas, kick users, promote/demote roles, lock room, presentation
+        mode, version restore).
+      </li>
+      <li>
+        <strong><code>EDITOR</code></strong
+        >: Read/write access (draw, erase, insert shapes/text/images, chat).
+      </li>
+      <li>
+        <strong><code>VIEWER</code></strong
+        >: Read-only observation (receives live canvas updates, can pan/zoom and text chat; socket
+        mutations are rejected server-side).
+      </li>
+      <p>
+        2. <strong>Password Protection</strong>: Room passwords are salted and hashed using
+        Node.js's native <code>crypto.scrypt</code> (64-byte key length). Passwords are never stored
+        in plaintext.
+      </p>
+      <p>
+        3. <strong>Brute-Force Rate Limiting</strong>: Client IP addresses are tracked; 5 failed
+        password attempts within 60 seconds trigger automatic rate-limit throttling.
+      </p>
+      <p>
+        4. <strong>Input Sanitization</strong>: Every inbound frame is validated via Zod schemas.
+        Malformed payloads or illegal coordinate ranges are dropped before reaching application
+        logic.
+      </p>
+    </ul>
+    <hr />
+    <h2>8. User Guide &amp; Operating Instructions</h2>
+    <h3>8.1 Starting the Server</h3>
+    <p>Run the standalone server executable from the command line:</p>
+    <pre><code class="lang-bash">
+# Windows
+.\whiteboard-server-win-x64.exe --port 4000 --data-dir ./data
+
+# Linux
+./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
+
+# macOS
+./whiteboard-server-macos-arm64 --port 4000 --data-dir ./data
+</code></pre>
+    <p>The server displays its LAN IP addresses on startup:</p>
+    <pre><code class="lang-text">
+[INFO] [TCPServer] Server bound and listening on 0.0.0.0:4000
+[INFO] [TCPServer] Accessible across your Local Area Network via:
+[INFO] [TCPServer]   -&gt; tcp://192.168.1.105:4000
+[INFO] [Discovery] LAN discovery listening on udp/45454
+</code></pre>
+    <h3>8.2 Connecting Clients</h3>
+    <p>
+      1. Launch the <code>LAN Whiteboard</code> desktop app on any client computer connected to the
+      same LAN.
+    </p>
+    <p>2. Enter your display name.</p>
+    <p>
+      3. <strong>Auto-Discovery</strong>: Choose <strong>Find servers on this network</strong> to
+      detect active servers automatically via UDP broadcast.
+    </p>
+    <p>
+      4. <strong>Manual Connection</strong>: If UDP is blocked on your router, select
+      <strong>Manual IP Address</strong> and enter the server's IP (e.g.,
+      <code>192.168.1.105</code>) and Port (<code>4000</code>).
+    </p>
+    <h3>8.3 Hosting and Joining Sessions</h3>
+    <ul>
+      <li>
+        <strong>To Host</strong>: Click <strong>Host New Room</strong>, set an optional room name
+        and password, and click <strong>Create Room</strong>. Share the 6-character room code (e.g.,
+        <code>7RC7H3</code>) with your team.
+      </li>
+      <li>
+        <strong>To Join</strong>: Click <strong>Join Existing Room</strong>, enter the 6-character
+        room code and password (if required), and click <strong>Join</strong>.
+      </li>
+    </ul>
+    <h3>8.4 Using the Drawing Tools</h3>
+    <ul>
+      <li><strong>Select (<code>V</code>)</strong>: Move, resize, and delete existing objects.</li>
+      <li>
+        <strong>Pen (<code>P</code>)</strong>: Freehand drawing with smooth anti-aliased calligraphy
+        strokes.
+      </li>
+      <li>
+        <strong>Eraser (<code>E</code>)</strong>: Object-level eraser with collision hit-testing.
+      </li>
+      <li>
+        <strong
+          >Shapes (<code>S</code> / <code>R</code> / <code>O</code> / <code>L</code> /
+          <code>A</code>)</strong
+        >: Draw Rectangles, Ellipses, Lines, and Arrows.
+      </li>
+      <li><strong>Text Box (<code>T</code>)</strong>: Place resizable multiline text blocks.</li>
+      <li><strong>Sticky Note (<code>N</code>)</strong>: Colored brainstorming cards.</li>
+      <li>
+        <strong>Image (<code>I</code>)</strong>: Insert local images (PNG/JPEG) with chunked network
+        transfer.
+      </li>
+      <li>
+        <strong>Laser Pointer</strong>: Temporary glowing pointer for highlighting areas during
+        presentations.
+      </li>
+      <li>
+        <strong>Canvas Navigation</strong>: Hold <code>Spacebar</code> + Drag (or Middle Mouse Drag)
+        to Pan; <code>Ctrl</code> + Scroll to Zoom.
+      </li>
+    </ul>
+    <h3>8.5 Group Chat &amp; Collaboration</h3>
+    <ul>
+      <li>
+        Click the <strong>Chat</strong> icon in the Top Bar to toggle the real-time group chat
+        sidebar.
+      </li>
+      <li>
+        Switch to the <strong>Participants</strong> tab to view connected peers, check their
+        assigned colors, or (if Host) manage their roles.
+      </li>
+    </ul>
+    <hr />
+    <h2>9. Verification &amp; Experimental Results</h2>
+    <h3>9.1 Automated Test Suite</h3>
+    <p>
+      The codebase is validated by
+      <strong>175 automated unit and integration tests across 26 test suites</strong>:
+    </p>
+    <ul>
+      <li>
+        <strong>Framing &amp; Protocol</strong>: Tested against stream fragmentation, frame
+        coalescing, 8 MB oversize rejection, and malformed JSON recovery.
+      </li>
+      <li>
+        <strong>Multi-Client Concurrency</strong>: Real TCP sockets concurrently generating strokes,
+        shapes, and chat messages without state divergence.
+      </li>
+      <li>
+        <strong>Role Enforcement</strong>: Automated verification that viewers cannot mutate canvas
+        state.
+      </li>
+      <li>
+        <strong>Persistence &amp; Restore</strong>: Verification that server restarts restore
+        complete board states from disk.
+      </li>
+    </ul>
+    <h3>9.2 Lossy Network Simulation Benchmark</h3>
+    <p>
+      Using our custom TCP lossy proxy harness (<code>tests/lossy-proxy.ts</code>), we subjected
+      multi-client sessions to adversarial network conditions:
+    </p>
+    <ul>
+      <li><strong>Artificial Delay</strong>: 50–200 ms latency injection.</li>
+      <li><strong>Packet Duplication</strong>: 10% duplicated TCP segments.</li>
+      <li>
+        <strong>Packet Reordering &amp; Loss</strong>: Injected segment drops and out-of-order
+        deliveries.
+      </li>
+    </ul>
+    <p>
+      <strong>Result</strong>: Under all test configurations, the client reliable layer detected
+      sequence gaps, initiated incremental resyncs, and achieved
+      <strong>100% canvas convergence</strong> across all participants.
+    </p>
+    <hr />
+    <h2>10. Conclusion</h2>
+    <p>
+      The LAN-Based Multi-User Collaborative Whiteboard fulfills all core and advanced
+      specifications outlined in the Computer Networks Lab Project. By building our own binary
+      framing protocol over raw TCP sockets, executing mutations through a serialized room event
+      queue, implementing isolated per-user undo/redo semantics, and enforcing strict role-based
+      access control, we demonstrated that modern, fluid collaborative software can be engineered
+      without reliance on cloud infrastructure or proprietary networking frameworks.
+    </p>
+  </body>
+</html>

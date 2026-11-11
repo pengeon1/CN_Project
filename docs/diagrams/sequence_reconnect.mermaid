@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    actor Alice as User Alice
+    participant ClientA as Client A (Main/Renderer)
+    participant Server as Central TCP Server
+    participant ClientB as Other Participants
+
+    Note over ClientA,Server: Normal Steady State (Periodic Heartbeats)
+    loop Every 5 Seconds
+        ClientA->>Server: PING { msg_id: "p1" }
+        Server-->>ClientA: PONG { msg_id: "p1", roomSeq: 105 }
+    end
+
+    Note over ClientA,Server: Network Hiccup / Ethernet Cable Disconnected
+    ClientA--xServer: Socket abruptly closed or packet loss
+    ClientA->>ClientA: Heartbeat missed or socket 'close' event fired
+    ClientA->>Alice: Display top amber banner: "Connection lost. Reconnecting..."
+    ClientA->>ClientA: Buffer pending user ops in Outbox FIFO queue
+
+    Note over Server: Server Heartbeat Monitor
+    rect rgb(255, 240, 240)
+        Note over Server: Server retains Alice's session for grace window (15 seconds)<br/>Room remains alive and untouched!
+    end
+
+    Note over ClientA: Exponential Backoff Reconnect (500ms, 1s, 2s...)
+    ClientA->>Server: New TCP connection established
+    ClientA->>Server: HELLO { sessionToken: "alice-session-token-12345" }
+    Server->>Server: Recognize valid session token -> Takeover session!
+    Server-->>ClientA: AUTH_OK { resumed: true, sessionToken: "alice-session-token-12345" }
+
+    Note over ClientA,Server: Sequence Gap Detection & Incremental Resync
+    ClientA->>ClientA: Client last applied sequence = 105
+    ClientA->>Server: RESYNC_REQUEST { roomCode: "7RC7H3", fromSeq: 105 }
+    Server->>Server: Query in-memory ops log from seq 106 to current seq 108
+    Server-->>ClientA: RESYNC_RESPONSE { fullSnapshot: false, operations: [Op106, Op107, Op108] }
+    ClientA->>ClientA: Sequentially apply Op106, Op107, Op108
+    ClientA->>Alice: Canvas up-to-date! Reconnect banner dismissed.
+
+    Note over ClientA,Server: Outbox Retransmission (Deduplication Guarantee)
+    ClientA->>Server: Retransmit queued unacknowledged op: SHAPE_ADD { op_id: "op-201" }
+    Server->>Server: Deduplicate by op_id: "op-201" processed successfully
+    Server-->>ClientA: ACK SHAPE_ADD { seq: 109, op_id: "op-201" }
+    Server-->>ClientB: Broadcast SHAPE_ADD { seq: 109, op_id: "op-201" }

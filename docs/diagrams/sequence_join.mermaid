@@ -1,0 +1,40 @@
+sequenceDiagram
+    autonumber
+    actor Alice as User Alice (Host)
+    participant ClientA as Client A (Main/Renderer)
+    participant Server as Central TCP Server
+    participant ClientB as Client B (Late Joiner)
+    actor Bob as User Bob (Viewer/Editor)
+
+    Note over Alice,Server: 1. Host Creates Room
+    Alice->>ClientA: Clicks "Host New Room"
+    ClientA->>Server: TCP HELLO { protocol_version: 1 }
+    Server-->>ClientA: AUTH_OK { session_token, server_id, client_ip }
+    ClientA->>Server: CREATE_ROOM { roomName: "Brainstorming", password: null }
+    Server->>Server: Generate unique 6-char room code (e.g., "7RC7H3")
+    Server->>Server: Assign Alice role: HOST (seq = 0)
+    Server-->>ClientA: ROOM_STATE { roomCode: "7RC7H3", seq: 0, objects: {}, participants: [Alice] }
+    ClientA->>Alice: Display active canvas with room code "7RC7H3"
+
+    Note over Alice,Server: 2. Alice Draws on Canvas
+    Alice->>ClientA: Draws pen stroke
+    ClientA->>Server: STROKE_BEGIN + STROKE_POINTS + STROKE_END (op_id: X1)
+    Server->>Server: Sequence op: seq = 1, persist in memory log
+    Server-->>ClientA: ACK / Echo STROKE_END (seq: 1, op_id: X1)
+
+    Note over Bob,Server: 3. Bob Joins Mid-Session (Late Joiner)
+    Bob->>ClientB: Enter IP:Port and Room Code "7RC7H3", username "Bob"
+    ClientB->>Server: TCP Connect & HELLO
+    Server-->>ClientB: AUTH_OK { session_token, client_ip }
+    ClientB->>Server: JOIN_ROOM { roomCode: "7RC7H3", username: "Bob", password: null }
+    Server->>Server: Validate room code & password
+    Server->>Server: Register Bob (Role: EDITOR)
+    Server->>Server: Sequence PARTICIPANT_JOINED (seq = 2)
+    
+    par State Sync to Late Joiner
+        Server-->>ClientB: ROOM_STATE { seq: 2, objects: { X1: strokeData }, participants: [Alice, Bob], chatHistory: [...] }
+        ClientB->>Bob: Instantly renders full board snapshot and user list
+    and Broadcast to Existing Peers
+        Server-->>ClientA: PARTICIPANT_JOINED { seq: 2, user: Bob, role: EDITOR }
+        ClientA->>Alice: Update participants list & display toast "Bob joined"
+    end

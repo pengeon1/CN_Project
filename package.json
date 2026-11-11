@@ -18,7 +18,8 @@
     "package:server": "node scripts/package-server.mjs",
     "package:client": "npm --workspace=@cn-whiteboard/client run package",
     "package:all": "npm run package:server && npm run package:client",
-    "smoke:server": "node scripts/smoke-server-binary.mjs"
+    "smoke:server": "node scripts/smoke-server-binary.mjs",
+    "docs:pdf": "node scripts/generate-docs-pdf.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",

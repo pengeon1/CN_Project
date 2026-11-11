@@ -1,0 +1,50 @@
+sequenceDiagram
+    autonumber
+    actor Alice as Alice (Drawing)
+    participant RendererA as Client A Renderer (Zustand/Canvas)
+    participant MainA as Client A Main (Outbox/Socket)
+    participant Server as Central TCP Server (Room FIFO Queue)
+    participant MainB as Client B Main (Socket/Inbound Buffer)
+    participant RendererB as Client B Renderer (Zustand/Canvas)
+    actor Bob as Bob (Collaborator)
+
+    Note over Alice,RendererA: Pointer Down (Pen Tool)
+    Alice->>RendererA: MouseDown at (100, 150)
+    RendererA->>RendererA: Render stroke optimistically on live Canvas layer
+    RendererA->>MainA: IPC send STROKE_BEGIN { op_id: "op-101", strokeId: "s-1", color: "#10B981", width: 4 }
+    MainA->>Server: TCP Frame: STROKE_BEGIN { op_id: "op-101", seq: 0, ... }
+
+    Note over Server: Server enqueues in Room FIFO queue
+    Server->>Server: Validate sender role (EDITOR/HOST)
+    Server->>Server: Deduplicate by op_id ("op-101" unseen -> process)
+    Server->>Server: Assign monotonic sequence: seq = 42
+    
+    par Echo to Author
+        Server-->>MainA: TCP Frame: STROKE_BEGIN { seq: 42, op_id: "op-101", ... }
+        MainA->>RendererA: IPC: Server confirmed op-101 with seq 42 (reconcile)
+    and Broadcast to Peers
+        Server-->>MainB: TCP Frame: STROKE_BEGIN { seq: 42, op_id: "op-101", ... }
+        MainB->>RendererB: IPC: Apply remote stroke begin (seq 42)
+        RendererB->>Bob: Stroke begins appearing on Bob's screen in Alice's color
+    end
+
+    Note over Alice,RendererA: Freehand Movement (Batched at ~16-33ms)
+    Alice->>RendererA: MouseMove series: [(102, 152), (106, 156), (110, 160)...]
+    RendererA->>RendererA: Draw curve using perfect-freehand algorithm
+    RendererA->>MainA: IPC: STROKE_POINTS { op_id: "op-102", strokeId: "s-1", points: [...] }
+    MainA->>Server: TCP Frame: STROKE_POINTS { op_id: "op-102", seq: 0, points: [...] }
+    Server->>Server: seq = 43 -> broadcast to all
+    Server-->>MainB: TCP Frame: STROKE_POINTS { seq: 43, points: [...] }
+    MainB->>RendererB: Append points & redraw
+    RendererB->>Bob: Smooth stroke extends in real time
+
+    Note over Alice,RendererA: Pointer Up (Stroke Completion)
+    Alice->>RendererA: MouseUp at (120, 170)
+    RendererA->>MainA: IPC: STROKE_END { op_id: "op-103", strokeId: "s-1" }
+    MainA->>Server: TCP Frame: STROKE_END { op_id: "op-103", seq: 0 }
+    Server->>Server: seq = 44 -> Materialize stroke in Object Map
+    Server->>Server: Trigger debounced disk autosave (scheduleSave)
+    Server-->>MainA: TCP Frame: STROKE_END { seq: 44, op_id: "op-103" }
+    Server-->>MainB: TCP Frame: STROKE_END { seq: 44, op_id: "op-103" }
+    RendererA->>RendererA: Commit stroke to static cached canvas bitmap
+    RendererB->>RendererB: Commit stroke to static cached canvas bitmap

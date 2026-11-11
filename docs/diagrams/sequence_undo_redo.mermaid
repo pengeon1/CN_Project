@@ -1,0 +1,28 @@
+sequenceDiagram
+    autonumber
+    actor Alice as Alice
+    participant ClientA as Client A
+    participant Server as Central TCP Server
+    participant ClientB as Client B
+    actor Bob as Bob
+
+    Note over Alice,Bob: Shared Canvas Context: Alice added a Rectangle (ID: R1)
+    Alice->>ClientA: Presses Ctrl+Z (Undo)
+    ClientA->>ClientA: Pop target op from Alice's local undo stack -> Op adding R1
+    ClientA->>Server: UNDO { op_id: "undo-1", target_op_id: "op-rect-1", target_object_id: "R1" }
+
+    Note over Server: Server executes in Room FIFO Queue
+    Server->>Server: Verify sender owns target op (Alice owns op-rect-1)
+    Server->>Server: Check if R1 still exists and has not been mutated/deleted by another peer
+    alt Object Exists and No Conflict
+        Server->>Server: Sequence compensating UNDO op: seq = 75
+        Server->>Server: Remove R1 from active objects map
+        Server-->>ClientA: Broadcast UNDO { seq: 75, target_op_id: "op-rect-1", target_object_id: "R1" }
+        Server-->>ClientB: Broadcast UNDO { seq: 75, target_op_id: "op-rect-1", target_object_id: "R1" }
+        ClientA->>Alice: R1 disappears from canvas; push to Alice's redo stack
+        ClientB->>Bob: R1 disappears from canvas; Bob's undo stack untouched!
+    else Conflict / Already Deleted by Bob
+        Server->>Server: Treat undo as harmless no-op
+        Server-->>ClientA: ERROR / ACK { status: "no_op", message: "Target already modified or deleted" }
+        ClientA->>Alice: Display unobtrusive toast: "Cannot undo: object was already modified"
+    end

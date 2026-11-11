@@ -331,6 +331,20 @@ export const WhiteboardCanvas: React.FC = () => {
   const following = presentation.active && !amHost;
   const [editorText, setEditorText] = useState('');
   const editorClosedRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Automatically focus and select textarea when editor opens
+  useEffect(() => {
+    if (editor) {
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          const val = textareaRef.current.value;
+          textareaRef.current.setSelectionRange(val.length, val.length);
+        }
+      });
+    }
+  }, [editor]);
 
   // Author attribution tooltip state
   const [hoveredAuthor, setHoveredAuthor] = useState<HoveredAuthorInfo | null>(null);
@@ -788,7 +802,7 @@ export const WhiteboardCanvas: React.FC = () => {
   }, [selectedIds, deleteObjects, setSelectedIds]);
 
   const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (activeTool !== 'select') return;
+    if (activeTool !== 'select' && activeTool !== 'text' && activeTool !== 'sticky_note') return;
     const { x, y } = screenToWorld(e.clientX, e.clientY);
     const hit = pickTopmost(objects, x, y, 8 / zoom);
     if (hit) {
@@ -830,7 +844,23 @@ export const WhiteboardCanvas: React.FC = () => {
 
     // Shape / text / sticky tools: drag to size, or click for a default size
     if (e.button === 0 && isShapeTool(activeTool)) {
+      if (editor) {
+        closeEditor(true);
+      }
       const { x, y } = screenToWorld(e.clientX, e.clientY);
+      if (activeTool === 'text') {
+        const hit = pickTopmost(objects, x, y, 8 / zoom);
+        if (
+          hit &&
+          hit.type === 'shape' &&
+          (hit.shapeType === 'text' || hit.shapeType === 'sticky_note')
+        ) {
+          setSelectedIds([hit.id]);
+          beginEdit(hit);
+          e.preventDefault();
+          return;
+        }
+      }
       dragRef.current = { kind: 'create', sx: x, sy: y, tool: activeTool };
       setDraft(buildShape(activeTool, x, y, 0, 0));
       containerRef.current?.setPointerCapture(e.pointerId);
@@ -1133,26 +1163,44 @@ export const WhiteboardCanvas: React.FC = () => {
       {/* Inline text editor (text boxes, sticky notes, text inside shapes) */}
       {editor && editorBounds && (
         <textarea
-          autoFocus
+          ref={textareaRef}
           value={editorText}
+          placeholder={editor.base.shapeType === 'text' ? 'Type text...' : 'Note text...'}
           onChange={(e) => setEditorText(e.target.value)}
           onBlur={() => closeEditor(true)}
           onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') closeEditor(false);
-            else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) closeEditor(true);
+            e.stopPropagation();
+            if (e.key === 'Escape') {
+              closeEditor(false);
+            } else if (e.key === 'Enter') {
+              if (editor.base.shapeType === 'text' && !e.shiftKey) {
+                e.preventDefault();
+                closeEditor(true);
+              } else if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                closeEditor(true);
+              }
+            }
           }}
-          className="absolute z-30 resize-none overflow-hidden rounded border-2 border-blue-500 bg-transparent p-1 outline-none"
+          className="absolute z-30 resize-none overflow-hidden rounded border-2 border-blue-500 p-1.5 outline-none shadow-lg"
           style={{
             left: (editorBounds.x + panX) * zoom,
             top: (editorBounds.y + panY) * zoom,
-            width: Math.max(editorBounds.w * zoom, 60),
-            height: Math.max(editorBounds.h * zoom, 30),
+            width: Math.max(editorBounds.w * zoom, 120),
+            height: Math.max(editorBounds.h * zoom, 38),
             font: fontOf({ ...editor.base, fontSize: (editor.base.fontSize ?? 16) * zoom }),
             textAlign: editor.base.align ?? 'left',
             color:
               editor.base.shapeType === 'sticky_note' ? STICKY_TEXT_COLOR : editor.base.strokeColor,
-            background: editor.base.shapeType === 'sticky_note' ? editor.base.fillColor : undefined,
+            background:
+              editor.base.shapeType === 'sticky_note'
+                ? editor.base.fillColor
+                : isDarkTheme
+                  ? 'rgba(15, 23, 42, 0.92)'
+                  : 'rgba(255, 255, 255, 0.95)',
           }}
         />
       )}

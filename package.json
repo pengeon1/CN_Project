@@ -35,6 +35,6 @@
     "vitest": "^2.1.5"
   },
   "allowScripts": {
-    "electron@33.4.11": true
+    "electron@45.2.3": true
   }
 }

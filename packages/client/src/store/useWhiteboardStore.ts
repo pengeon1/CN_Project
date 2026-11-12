@@ -1048,13 +1048,17 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     const api = getElectronAPI();
     if (!currentUser || !roomInfo || !api) return;
 
+    const canEdit =
+      canMutateCanvas(currentUser.role) && (!roomInfo.locked || isHost(currentUser.role));
+    const effectiveTool = !canEdit && activeTool !== 'select' ? 'select' : activeTool;
+
     const payload: CursorMovePayload = {
       x,
       y,
-      activeTool,
+      activeTool: effectiveTool,
       pressure,
     };
-    if (points && points.length > 0) {
+    if (effectiveTool === 'laser' && points && points.length > 0) {
       payload.points = points.slice(0, 64);
     }
 
@@ -1472,10 +1476,14 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         const currentUserId = envelope.user_id;
         const myParticipant = payload.participants.find((p) => p.id === currentUserId);
 
+        const canEdit =
+          !myParticipant ||
+          (canMutateCanvas(myParticipant.role) && (!payload.locked || isHost(myParticipant.role)));
+
         // Note: liveLocalStroke is deliberately preserved. A snapshot received while the user is
         // mid-stroke (reconnect) must not abort the stroke; its remaining points and its end are
         // still delivered from the outbox.
-        set({
+        set((state) => ({
           connectionStatus: 'connected',
           roomInfo: {
             code: payload.roomCode,
@@ -1494,6 +1502,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
                 role: myParticipant.role,
               }
             : null,
+          activeTool: canEdit ? state.activeTool : 'select',
           participants: payload.participants,
           objects: payload.objects || {},
           presentation: { ...(payload.presentation ?? { active: false }), receivedAt: Date.now() },
@@ -1503,7 +1512,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           remoteCursors: {},
           chatMessages: payload.chatHistory.map(toChatEntry),
           connectModalOpen: false,
-        });
+        }));
         break;
       }
 
@@ -1819,19 +1828,21 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             state.currentUser && state.currentUser.id === payload.targetUserId && payload.newRole
               ? { ...state.currentUser, role: payload.newRole }
               : state.currentUser;
+          const nextLocked =
+            payload.lockRoom !== undefined ? payload.lockRoom : (state.roomInfo?.locked ?? false);
+          const stillCanEdit =
+            !updatedCurrent ||
+            (canMutateCanvas(updatedCurrent.role) && (!nextLocked || isHost(updatedCurrent.role)));
 
           return {
             participants: updatedParticipants,
             currentUser: updatedCurrent,
-            activeTool:
-              payload.targetUserId === state.currentUser?.id && payload.newRole === Role.VIEWER
-                ? 'select'
-                : state.activeTool,
+            activeTool: stillCanEdit ? state.activeTool : 'select',
             roomInfo: state.roomInfo
               ? {
                   ...state.roomInfo,
                   isHost: updatedCurrent?.role === Role.HOST,
-                  locked: payload.lockRoom !== undefined ? payload.lockRoom : state.roomInfo.locked,
+                  locked: nextLocked,
                 }
               : null,
           };

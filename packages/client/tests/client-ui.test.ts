@@ -19,6 +19,7 @@ import {
   useWhiteboardStore,
 } from '../src/store/useWhiteboardStore.js';
 import { PropertyBarContent } from '../src/components/layout/PropertyBar.js';
+import { LeftToolbarContent } from '../src/components/layout/LeftToolbar.js';
 import { computeResizedObjectChanges, pickHandle } from '../src/components/canvas/shapes.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 import { shouldDismissOnOutsideEvent } from '../src/hooks/useClickOutside.js';
@@ -1640,6 +1641,69 @@ describe('Client UI & Store Suite', () => {
       expect(updates[imageId]).toEqual({ x: 100, y: 100, width: 260, height: 190 });
       // Bound connector right-side anchor moves to new right edge (360, 100 + 190/2 = 195)
       expect(updates[connectorId]).toEqual({ x: 360, y: 195, width: 60, height: -20 });
+    });
+
+    it('disables the laser pointer and resets activeTool in viewer or locked rooms', () => {
+      const hostId = generateUuid();
+      const viewerId = generateUuid();
+      useWhiteboardStore.setState({
+        activeTool: 'pen',
+        currentUser: { id: viewerId, username: 'Viewer', color: '#3B82F6', role: Role.VIEWER },
+        roomInfo: { code: 'LASER1', name: 'Test', isHost: false, locked: false },
+      });
+
+      // Viewer cannot select laser
+      useWhiteboardStore.getState().setActiveTool('laser');
+      expect(useWhiteboardStore.getState().activeTool).toBe('pen');
+
+      // Toolbar disables laser button for viewers
+      const viewerToolbar = renderToStaticMarkup(
+        React.createElement(LeftToolbarContent, useWhiteboardStore.getState()),
+      );
+      expect(viewerToolbar).toContain('Laser pointer (K) (read-only)');
+
+      // ROOM_STATE for a viewer resets activeTool to select
+      useWhiteboardStore.getState().handleIncomingEnvelope(
+        createEnvelope(
+          MessageType.ROOM_STATE,
+          {
+            roomCode: 'LASER1',
+            roomName: 'Test',
+            seq: 1,
+            objects: {},
+            participants: [
+              { id: hostId, username: 'Host', role: Role.HOST, color: '#000000', joinedAt: 1 },
+              {
+                id: viewerId,
+                username: 'Viewer',
+                role: Role.VIEWER,
+                color: '#3B82F6',
+                joinedAt: 2,
+              },
+            ],
+            chatHistory: [],
+            locked: false,
+          } satisfies RoomStatePayload,
+          { room: 'LASER1', user_id: viewerId, seq: 1 },
+        ),
+      );
+      expect(useWhiteboardStore.getState().activeTool).toBe('select');
+
+      // Locking a room also resets an editor using laser back to select
+      useWhiteboardStore.setState({
+        currentUser: { id: viewerId, username: 'Editor', color: '#3B82F6', role: Role.EDITOR },
+        activeTool: 'laser',
+      });
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { lockRoom: true },
+            { room: 'LASER1', user_id: hostId, seq: 2 },
+          ),
+        );
+      expect(useWhiteboardStore.getState().activeTool).toBe('select');
     });
   });
 });

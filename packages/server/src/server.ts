@@ -791,10 +791,20 @@ export class WhiteboardServer {
         if (session.roomCode) {
           const room = this.roomManager.getRoom(session.roomCode);
           if (room) {
-            const payload = validatePayload<CursorMovePayload>(
+            const rawPayload = validatePayload<CursorMovePayload>(
               MessageType.CURSOR_MOVE,
               envelope.payload,
             );
+            const canEdit = canMutateCanvas(session.role) && (!room.locked || isHost(session.role));
+            const payload: CursorMovePayload =
+              !canEdit && rawPayload.activeTool === 'laser'
+                ? {
+                    x: rawPayload.x,
+                    y: rawPayload.y,
+                    activeTool: 'select',
+                    ...(rawPayload.pressure !== undefined ? { pressure: rawPayload.pressure } : {}),
+                  }
+                : rawPayload;
             const cursorEnvelope = createEnvelope(MessageType.CURSOR_MOVE, payload, {
               msg_id: envelope.msg_id,
               seq: 0,

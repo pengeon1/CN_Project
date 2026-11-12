@@ -12,6 +12,7 @@ import { getStroke } from 'perfect-freehand';
 import {
   type AnchorRef,
   CURSOR_THROTTLE_MS,
+  canMutateCanvas,
   isHost,
   type ObjectChanges,
   PRESENTATION_HEARTBEAT_MS,
@@ -325,6 +326,7 @@ export const WhiteboardCanvas: React.FC = () => {
     remoteCursors,
     participants,
     currentUser,
+    roomInfo,
     startDrawing,
     updateLocalLivePoint,
     appendDrawingPoints,
@@ -350,6 +352,10 @@ export const WhiteboardCanvas: React.FC = () => {
     setActiveTextEditor,
     requestTextEdit,
   } = useWhiteboardStore();
+
+  const canEdit =
+    !currentUser ||
+    (canMutateCanvas(currentUser.role) && (!roomInfo?.locked || isHost(currentUser.role)));
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1221,7 +1227,7 @@ export const WhiteboardCanvas: React.FC = () => {
     // Select tool: resize handle, then body hit (move), else clear selection
     if (e.button === 0 && activeTool === 'select') {
       const { x, y } = screenToWorld(e.clientX, e.clientY);
-      const sole = selectedIds.length === 1 ? objects[selectedIds[0]!] : undefined;
+      const sole = canEdit && selectedIds.length === 1 ? objects[selectedIds[0]!] : undefined;
       const handle = sole ? pickHandle(sole, x, y, zoom) : null;
       if (sole && handle) {
         dragRef.current = { kind: 'resize', id: sole.id, handle };
@@ -1238,7 +1244,7 @@ export const WhiteboardCanvas: React.FC = () => {
           ids = [hit.id];
         }
         setSelectedIds(ids);
-        if (ids.includes(hit.id)) {
+        if (canEdit && ids.includes(hit.id)) {
           dragRef.current = { kind: 'move', sx: x, sy: y, ids, moved: false };
           containerRef.current?.setPointerCapture(e.pointerId);
         }
@@ -1371,7 +1377,9 @@ export const WhiteboardCanvas: React.FC = () => {
       }
     }
 
-    if (activeTool === 'laser') {
+    const laserActive = activeTool === 'laser' && canEdit;
+
+    if (laserActive) {
       const nativeEvt = e.nativeEvent as PointerEvent & {
         getCoalescedEvents?: () => PointerEvent[];
       };
@@ -1401,17 +1409,16 @@ export const WhiteboardCanvas: React.FC = () => {
     }
 
     // Throttled cursor broadcast (16ms ~60Hz for laser pointer with full vertex batching)
-    const throttleMs = activeTool === 'laser' ? 16 : CURSOR_THROTTLE_MS;
+    const throttleMs = laserActive ? 16 : CURSOR_THROTTLE_MS;
     if (now - lastCursorSendRef.current >= throttleMs) {
       if (laserFlushTimerRef.current) {
         clearTimeout(laserFlushTimerRef.current);
         laserFlushTimerRef.current = null;
       }
-      const batch =
-        activeTool === 'laser' ? pendingLaserPointsRef.current.splice(0, 64) : undefined;
+      const batch = laserActive ? pendingLaserPointsRef.current.splice(0, 64) : undefined;
       broadcastCursorPosition(x, y, e.pressure, batch && batch.length > 0 ? batch : undefined);
       lastCursorSendRef.current = now;
-    } else if (activeTool === 'laser' && !laserFlushTimerRef.current) {
+    } else if (laserActive && !laserFlushTimerRef.current) {
       laserFlushTimerRef.current = setTimeout(() => {
         laserFlushTimerRef.current = null;
         const remaining = pendingLaserPointsRef.current.splice(0, 64);

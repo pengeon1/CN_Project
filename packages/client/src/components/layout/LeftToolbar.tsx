@@ -25,7 +25,7 @@ import {
   Type,
   Workflow,
 } from 'lucide-react';
-import { canMutateCanvas, isHost } from '@cn-whiteboard/common';
+import { canMutateCanvas, isHost, type Role } from '@cn-whiteboard/common';
 import { type CanvasTool, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { insertImageFile } from '../canvas/imageInsert.js';
@@ -49,19 +49,36 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: 'line', label: 'Line (N)', icon: Minus },
 ];
 
+export interface LeftToolbarProps {
+  activeTool: CanvasTool;
+  setActiveTool: (tool: CanvasTool) => void;
+  currentUser: { id: string; username: string; color: string; role: Role } | null;
+  roomInfo: { code: string; name: string; isHost: boolean; locked: boolean } | null;
+  setClearModalOpen: (open: boolean) => void;
+  resetView: () => void;
+  setSearchOpen: (open: boolean) => void;
+  setLoadModalOpen: (open: boolean) => void;
+  setVersionsOpen: (open: boolean) => void;
+  setShortcutsModalOpen: (open: boolean) => void;
+}
+
 export const LeftToolbar: React.FC = () => {
-  const {
-    activeTool,
-    setActiveTool,
-    currentUser,
-    roomInfo,
-    setClearModalOpen,
-    resetView,
-    setSearchOpen,
-    setLoadModalOpen,
-    setVersionsOpen,
-    setShortcutsModalOpen,
-  } = useWhiteboardStore();
+  const state = useWhiteboardStore();
+  return <LeftToolbarContent {...state} />;
+};
+
+export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
+  activeTool,
+  setActiveTool,
+  currentUser,
+  roomInfo,
+  setClearModalOpen,
+  resetView,
+  setSearchOpen,
+  setLoadModalOpen,
+  setVersionsOpen,
+  setShortcutsModalOpen,
+}) => {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -79,8 +96,7 @@ export const LeftToolbar: React.FC = () => {
     >
       {PRIMARY_TOOLS.map((tool) => {
         const Icon = tool.icon;
-        // The laser is ephemeral presence, so even read-only viewers may point.
-        const isDisabled = tool.id !== 'select' && tool.id !== 'laser' && !canEdit;
+        const isDisabled = tool.id !== 'select' && !canEdit;
         const isActive = activeTool === tool.id && !isDisabled;
 
         return (
@@ -120,7 +136,11 @@ export const LeftToolbar: React.FC = () => {
         onClick={() => fileInput.current?.click()}
         disabled={!canEdit}
         title={canEdit ? 'Insert Image (or drop / paste one)' : 'Insert Image (read-only)'}
-        className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+        className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+          canEdit
+            ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+            : 'cursor-not-allowed text-slate-700'
+        }`}
       >
         <ImageIcon className="h-4 w-4" />
       </button>

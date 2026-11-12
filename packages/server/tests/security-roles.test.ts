@@ -287,6 +287,31 @@ describe('Security and room roles', () => {
     await editor.waitForError('FORBIDDEN');
     expect(Object.keys(room.getSnapshot().objects)).toHaveLength(0);
 
+    // Viewers cannot broadcast laser pointer trails either
+    editor.send(
+      MessageType.CURSOR_MOVE,
+      {
+        x: 120,
+        y: 80,
+        activeTool: 'laser',
+        points: [
+          { x: 110, y: 70 },
+          { x: 120, y: 80 },
+        ],
+      },
+      { room: roomCode, user_id: editorId },
+    );
+    const sanitizedCursor = await host.waitFor(
+      (message) => message.type === MessageType.CURSOR_MOVE && message.user_id === editorId,
+      'sanitized viewer cursor move',
+    );
+    expect((sanitizedCursor.payload as { activeTool?: string; points?: unknown }).activeTool).toBe(
+      'select',
+    );
+    expect(
+      (sanitizedCursor.payload as { activeTool?: string; points?: unknown }).points,
+    ).toBeUndefined();
+
     host.send(
       MessageType.PERMISSION_CHANGE,
       { targetUserId: editorId, newRole: Role.EDITOR },

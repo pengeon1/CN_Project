@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const rootPkg = JSON.parse(
   readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../package.json'), 'utf8'),
 );
-const APP_VERSION = typeof rootPkg.version === 'string' ? rootPkg.version : '1.0.1';
+const APP_VERSION = typeof rootPkg.version === 'string' ? rootPkg.version : '1.0.2';
 
 const exe = process.argv[2];
 if (!exe) {

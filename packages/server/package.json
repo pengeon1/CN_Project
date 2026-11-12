@@ -1,6 +1,6 @@
 {
   "name": "@cn-whiteboard/server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "CS3004 Computer Networks Practice — Standalone TCP/UDP LAN collaborative whiteboard server",
   "type": "module",

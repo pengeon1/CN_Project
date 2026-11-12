@@ -2,7 +2,7 @@
 
 **Course**: Computer Networks Practice (CS3004)  
 **Academic Year**: 2026-2027  
-**Document Revision**: 1.0.1  
+**Document Revision**: 1.0.2  
 **Deliverable**: Comprehensive Technical Report & User Guide
 
 ---
@@ -209,9 +209,9 @@ Unlike single-user applications where undo pops the global history stack, our sy
 ## 7. Security & Access Control
 
 1. **Role-Based Access Control (RBAC)**:
-   - **`HOST`**: Full control (clear canvas, kick users, promote/demote roles, lock room, presentation mode, version restore).
-   - **`EDITOR`**: Read/write access (draw, erase, insert shapes/text/images, chat).
-   - **`VIEWER`**: Read-only observation (receives live canvas updates, can pan/zoom and text chat; socket mutations are rejected server-side).
+   - **`HOST`**: Full control (clear canvas, kick/ban users or re-admit kicked users, promote/demote roles, toggle default joinees to viewer, lock room, presentation mode, version restore).
+   - **`EDITOR`**: Read/write access (draw, erase, insert/resize shapes and images, text, laser pointer, chat).
+   - **`VIEWER`**: Read-only observation (receives live canvas updates, can pan/zoom and text chat; canvas and laser mutations are rejected server-side).
 2. **Password Protection**: Room passwords are salted and hashed using Node.js's native `crypto.scrypt` (64-byte key length). Passwords are never stored in plaintext.
 3. **Brute-Force Rate Limiting**: Client IP addresses are tracked; 5 failed password attempts within 60 seconds trigger automatic rate-limit throttling.
 4. **Input Sanitization**: Every inbound frame is validated via Zod schemas. Malformed payloads or illegal coordinate ranges are dropped before reaching application logic.
@@ -248,9 +248,9 @@ The server displays its LAN IP addresses on startup:
 
 ### 8.2 Installing & Connecting Clients (Per OS)
 
-1. **Windows**: Run `LAN-Whiteboard-1.0.1-win-x64-nsis.exe` (or `-portable.exe`). If Windows SmartScreen appears, click **More info -> Run anyway**.
-2. **macOS**: Open `LAN-Whiteboard-1.0.1-mac-arm64.dmg` (or `-x64.dmg` / `.zip`; run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg` if quarantined), drag **`LAN Whiteboard.app`** to **Applications**, then run `xattr -cr "/Applications/LAN Whiteboard.app" && open "/Applications/LAN Whiteboard.app"`.
-3. **Linux**: Run `chmod +x ./LAN-Whiteboard-1.0.1-linux-x64.AppImage && ./LAN-Whiteboard-1.0.1-linux-x64.AppImage` (pass `--appimage-extract-and-run` if FUSE is unavailable).
+1. **Windows**: Run `LAN-Whiteboard-1.0.2-win-x64-nsis.exe` (or `-portable.exe`). If Windows SmartScreen appears, click **More info -> Run anyway**.
+2. **macOS**: Open `LAN-Whiteboard-1.0.2-mac-arm64.dmg` (or `-x64.dmg` / `.zip`; run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.2-mac-*.dmg` if quarantined), drag **`LAN Whiteboard.app`** to **Applications**, then run `xattr -cr "/Applications/LAN Whiteboard.app" && open "/Applications/LAN Whiteboard.app"`.
+3. **Linux**: Run `chmod +x ./LAN-Whiteboard-1.0.2-linux-x64.AppImage && ./LAN-Whiteboard-1.0.2-linux-x64.AppImage` (pass `--appimage-extract-and-run` if FUSE is unavailable).
 4. Enter your display name, select an auto-discovered server under **Find servers on this network** (or enter IP + port `4000` manually), and create or join a room.
 
 ### 8.3 Hosting and Joining Sessions

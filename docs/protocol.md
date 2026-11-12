@@ -113,7 +113,7 @@ Initiates the handshake upon establishing a TCP socket connection.
   "room": "",
   "user_id": "",
   "payload": {
-    "clientVersion": "1.0.1",
+    "clientVersion": "1.0.2",
     "suggestedUsername": "Alice"
   }
 }
@@ -628,7 +628,7 @@ Host-only, **unsequenced and latest-wins** (a viewport is meaningless once super
 
 #### Laser pointer (Phase 14)
 
-No new message: the laser tool reuses the ephemeral, throttled `CURSOR_MOVE` with `activeTool: "laser"`. Receivers draw a fading ~0.9 s glowing trail in the sender's colour instead of an arrow. Because it is presence data, read-only viewers may use it.
+No new message: the laser tool reuses the ephemeral, throttled `CURSOR_MOVE` with `activeTool: "laser"`. Receivers draw a fading ~0.9 s glowing trail in the sender's colour instead of an arrow. Only participants allowed to edit (`HOST` or `EDITOR` in an unlocked room) may use `activeTool: "laser"`; the client disables the laser tool for `VIEWER` users and the server downgrades `laser` to `"select"` when the sender cannot edit.
 
 #### Version history: `VERSION_SAVE`, `VERSION_LIST`, `VERSION_RESTORE` (Phase 14)
 
@@ -1163,7 +1163,7 @@ Everything above runs over TCP. The one exception is **server discovery**, which
 
 ```json
 { "magic": "CN-WHITEBOARD", "v": 1, "type": "PROBE" }
-{ "magic": "CN-WHITEBOARD", "v": 1, "type": "ANNOUNCE", "name": "lab-pc", "port": 4000, "rooms": 2, "appVersion": "1.0.1" }
+{ "magic": "CN-WHITEBOARD", "v": 1, "type": "ANNOUNCE", "name": "lab-pc", "port": 4000, "rooms": 2, "appVersion": "1.0.2" }
 ```
 
 **Safety properties**

@@ -104,17 +104,17 @@ To allow incoming TCP connections from other LAN devices:
 
 ### 3.1 Launching the Desktop Client
 
-Install and open the client app on your operating system (`1.0.1`):
+Install and open the client app on your operating system (`1.0.2`):
 
 1. **Windows (`x64`)**:
-   - Run `LAN-Whiteboard-1.0.1-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.1-win-x64-portable.exe` (standalone portable binary).
+   - Run `LAN-Whiteboard-1.0.2-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.2-win-x64-portable.exe` (standalone portable binary).
    - If **Windows SmartScreen** displays _"Windows protected your PC"_, click **More info** -> **Run anyway**.
 2. **macOS (`arm64` Apple Silicon / `x64` Intel)**:
-   - Open `LAN-Whiteboard-1.0.1-mac-arm64.dmg` (M1/M2/M3/M4) or `LAN-Whiteboard-1.0.1-mac-x64.dmg` (Intel), or extract the matching `.zip` archive.
-   - If your browser quarantined the `.dmg`, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg` in Terminal before opening it.
+   - Open `LAN-Whiteboard-1.0.2-mac-arm64.dmg` (M1/M2/M3/M4) or `LAN-Whiteboard-1.0.2-mac-x64.dmg` (Intel), or extract the matching `.zip` archive.
+   - If your browser quarantined the `.dmg`, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.2-mac-*.dmg` in Terminal before opening it.
    - Drag **`LAN Whiteboard.app`** to **Applications**, clear browser quarantine once (`xattr -cr "/Applications/LAN Whiteboard.app"`), and open it (`open "/Applications/LAN Whiteboard.app"` or **System Settings -> Privacy & Security -> Open Anyway**).
 3. **Linux (`x64`)**:
-   - Mark executable and run: `chmod +x LAN-Whiteboard-1.0.1-linux-x64.AppImage && ./LAN-Whiteboard-1.0.1-linux-x64.AppImage`.
+   - Mark executable and run: `chmod +x LAN-Whiteboard-1.0.2-linux-x64.AppImage && ./LAN-Whiteboard-1.0.2-linux-x64.AppImage`.
    - If FUSE (`libfuse2`) is missing (Ubuntu 22.04+/24.04+), pass `--appimage-extract-and-run` (and add `--no-sandbox` if user namespaces are restricted).
 
 ### 3.2 Connect Dialog: Automatic Discovery & Manual Connect
@@ -175,11 +175,11 @@ Click the prominent blue **Share** button in the Top Header Bar:
 
 The system enforces three distinct access tiers:
 
-| Role         | Permissions & Capabilities                                                                                                                                                                                                      |
-| :----------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`HOST`**   | Complete administrative control. Can draw, erase, insert shapes, edit text, clear canvas, kick participants, change roles (promote/demote), lock/unlock room, control presentation mode, and restore version history snapshots. |
-| **`EDITOR`** | Full creative collaboration. Can draw, erase, create shapes, add text, post sticky notes, upload images, send chat messages, and undo/redo own actions.                                                                         |
-| **`VIEWER`** | Read-only observation. Can view real-time drawing, pan and zoom locally, and participate in text chat. Mutating tools are disabled.                                                                                             |
+| Role         | Permissions & Capabilities                                                                                                                                                                                                                                                                                                                                        |
+| :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`HOST`**   | Complete administrative control. Can draw, erase, insert/resize shapes and images, edit text, use the laser pointer, clear canvas, kick or permanently ban participants (and re-admit kicked users), change roles (promote/demote), toggle **Default new joinees to Viewer**, lock/unlock room, control presentation mode, and restore version history snapshots. |
+| **`EDITOR`** | Full creative collaboration. Can draw, erase, create shapes, add text, post sticky notes, upload/resize images, use the laser pointer, send chat messages, and undo/redo own actions.                                                                                                                                                                             |
+| **`VIEWER`** | Read-only observation. Can view real-time drawing, pan and zoom locally, toggle remote cursor visibility, and participate in text chat. Mutating tools and the laser pointer are disabled.                                                                                                                                                                        |
 
 #### Changing Participant Roles & Moderation
 
@@ -187,8 +187,9 @@ The Host can open the **Participants Tab** in the Right Sidebar, click the optio
 
 - **Make Host**: Transfer room ownership.
 - **Make Editor / Make Viewer**: Modify editing privileges in real time.
-- **Kick User**: Disconnect user from the room immediately.
-- **Lock Room**: Prevent new participants from joining.
+- **Kick User**: Temporarily disconnect user from the room immediately (host can later click **Allow back** in the **Removed & Banned** section to re-admit mistakenly kicked users).
+- **Ban Permanently**: Permanently block the user (and their session/LAN IP) from rejoining the room.
+- **Lock Room / Default new joinees to Viewer**: Prevent new participants from joining, or assign new joinees the read-only `VIEWER` role automatically.
 
 ---
 
@@ -228,8 +229,9 @@ The interface follows modern design aesthetics inspired by Figma and FigJam:
   - **Smart Connector (`X` / `C`)**: Orthogonal elbow connector routing automatically between shapes/objects.
 - **Text Box (`T`)**: Click anywhere on the canvas to place an editable text block. Supports multiline notes with customizable font size, bold, and alignment.
 - **Sticky Note (`S`)**: Colorful digital sticky notes with integrated inline text editing, ideal for brainstorming and agile retrospectives.
-- **Image Insertion (`...` menu)**: Insert local PNG, JPEG, or WebP images. Images are automatically compressed, divided into chunked TCP frames, and synced across all peers.
-- **Laser Pointer (`K`)**: Smooth synchronized glowing pointer for highlighting canvas regions during presentations without leaving permanent strokes.
+- **Image Insertion (`...` menu)**: Insert local PNG, JPEG, or WebP images and resize them cleanly using corner selection handles. Images are automatically compressed, divided into chunked TCP frames, and synced across all peers.
+- **Utilities & Settings (`...` menu)**: Includes remote cursor visibility toggle (**Remote Cursors**), and host controls for **Default Joinees to Viewer** and **Allow Name Changes**; popovers close automatically on outside click or `Esc`.
+- **Laser Pointer (`K`)**: Smooth synchronized glowing pointer (available to `HOST` and `EDITOR`) for highlighting canvas regions during presentations without leaving permanent strokes.
 - **Find & Shortcuts (`Ctrl+F` / `?`)**: Search text across canvas objects (`Ctrl+F`) or open the full interactive keyboard shortcuts reference (`?`).
 
 ### 5.2 Floating Property Bar

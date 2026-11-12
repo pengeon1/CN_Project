@@ -44,7 +44,7 @@ Prebuilt, self-contained executables (server + desktop client for Windows, Linux
 
 ### Running Downloaded Binaries (Step-by-Step by OS)
 
-Download the release binaries from [GitHub Releases](https://github.com/pengeon1/CN_Project/releases) (`1.0.1` filenames below). Start **one server** on a host machine on your LAN, then run the **client** on each participant's machine.
+Download the release binaries from [GitHub Releases](https://github.com/pengeon1/CN_Project/releases) (`1.0.2` filenames below). Start **one server** on a host machine on your LAN, then run the **client** on each participant's machine.
 
 #### Windows (x64)
 
@@ -53,7 +53,7 @@ Download the release binaries from [GitHub Releases](https://github.com/pengeon1
    .\whiteboard-server-win-x64.exe --port 4000 --data-dir ./data
    ```
    Allow **Private networks** when Windows Defender Firewall prompts (TCP `4000` & UDP `45454`).
-2. Run `LAN-Whiteboard-1.0.1-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.1-win-x64-portable.exe`. If Windows SmartScreen appears, click **More info** -> **Run anyway**.
+2. Run `LAN-Whiteboard-1.0.2-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.2-win-x64-portable.exe`. If Windows SmartScreen appears, click **More info** -> **Run anyway**.
 3. Pick the discovered server (or enter the host LAN IP & port `4000`) and create or join a room.
 
 #### macOS (Apple Silicon `arm64` & Intel `x64`)
@@ -65,7 +65,7 @@ Download the release binaries from [GitHub Releases](https://github.com/pengeon1
    ./whiteboard-server-macos-arm64 --port 4000 --data-dir ./data   # use -x64 on Intel Macs
    ```
    Click **Allow** when macOS asks to allow incoming network connections.
-2. Open `LAN-Whiteboard-1.0.1-mac-arm64.dmg` (or `-x64.dmg`; if macOS blocked the `.dmg` download, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg` first) and drag **`LAN Whiteboard.app`** to **Applications** (or extract the `.zip`).
+2. Open `LAN-Whiteboard-1.0.2-mac-arm64.dmg` (or `-x64.dmg`; if macOS blocked the `.dmg` download, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.2-mac-*.dmg` first) and drag **`LAN Whiteboard.app`** to **Applications** (or extract the `.zip`).
 3. Clear the download quarantine flag once (builds are ad-hoc signed without paid Apple notarization) and open the app:
    ```bash
    xattr -cr "/Applications/LAN Whiteboard.app"
@@ -82,8 +82,8 @@ Download the release binaries from [GitHub Releases](https://github.com/pengeon1
    ```
 2. Make the AppImage executable and run it:
    ```bash
-   chmod +x ./LAN-Whiteboard-1.0.1-linux-x64.AppImage
-   ./LAN-Whiteboard-1.0.1-linux-x64.AppImage
+   chmod +x ./LAN-Whiteboard-1.0.2-linux-x64.AppImage
+   ./LAN-Whiteboard-1.0.2-linux-x64.AppImage
    ```
    If FUSE (`libfuse2`) is missing (Ubuntu 22.04+/24.04+), add `--appimage-extract-and-run` (and `--no-sandbox` if user namespaces are restricted).
 3. Pick the discovered server (or enter the host LAN IP & port `4000`) and create or join a room.

@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v1.0.1 to build executables on all three OSes and publish a GitHub release.
+# Push a tag like v1.0.2 to build executables on all three OSes and publish a GitHub release.
 on:
   push:
     tags:

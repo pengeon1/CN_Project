@@ -115,7 +115,7 @@
     <h1>LAN-Based Multi-User Collaborative Whiteboard: Technical Documentation &amp; User Guide</h1>
     <p><strong>Course</strong>: Computer Networks Practice (CS3004)</p>
     <p><strong>Academic Year</strong>: 2026-2027</p>
-    <p><strong>Document Revision</strong>: 1.0.1</p>
+    <p><strong>Document Revision</strong>: 1.0.2</p>
     <p><strong>Deliverable</strong>: Comprehensive Technical Report &amp; User Guide</p>
     <hr />
     <h2>Abstract</h2>
@@ -434,17 +434,18 @@ class Room {
     <ul>
       <li>
         <strong><code>HOST</code></strong
-        >: Full control (clear canvas, kick users, promote/demote roles, lock room, presentation
-        mode, version restore).
+        >: Full control (clear canvas, kick/ban users or re-admit kicked users, promote/demote
+        roles, toggle default joinees to viewer, lock room, presentation mode, version restore).
       </li>
       <li>
         <strong><code>EDITOR</code></strong
-        >: Read/write access (draw, erase, insert shapes/text/images, chat).
+        >: Read/write access (draw, erase, insert/resize shapes and images, text, laser pointer,
+        chat).
       </li>
       <li>
         <strong><code>VIEWER</code></strong
-        >: Read-only observation (receives live canvas updates, can pan/zoom and text chat; socket
-        mutations are rejected server-side).
+        >: Read-only observation (receives live canvas updates, can pan/zoom and text chat; canvas
+        and laser mutations are rejected server-side).
       </li>
       <p>
         2. <strong>Password Protection</strong>: Room passwords are salted and hashed using
@@ -486,14 +487,14 @@ chmod +x ./whiteboard-server-linux-x64
 </code></pre>
     <h3>8.2 Installing &amp; Connecting Clients (Per OS)</h3>
     <p>
-      1. <strong>Windows</strong>: Run <code>LAN-Whiteboard-1.0.1-win-x64-nsis.exe</code> (or
+      1. <strong>Windows</strong>: Run <code>LAN-Whiteboard-1.0.2-win-x64-nsis.exe</code> (or
       <code>-portable.exe</code>). If Windows SmartScreen appears, click
       <strong>More info -&gt; Run anyway</strong>.
     </p>
     <p>
-      2. <strong>macOS</strong>: Open <code>LAN-Whiteboard-1.0.1-mac-arm64.dmg</code> (or
+      2. <strong>macOS</strong>: Open <code>LAN-Whiteboard-1.0.2-mac-arm64.dmg</code> (or
       <code>-x64.dmg</code> / <code>.zip</code>; run
-      <code>xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg</code> if quarantined), drag
+      <code>xattr -cr ~/Downloads/LAN-Whiteboard-1.0.2-mac-*.dmg</code> if quarantined), drag
       <strong><code>LAN Whiteboard.app</code></strong> to <strong>Applications</strong>, then run
       <code
         >xattr -cr "/Applications/LAN Whiteboard.app" &amp;&amp; open "/Applications/LAN
@@ -503,8 +504,8 @@ chmod +x ./whiteboard-server-linux-x64
     <p>
       3. <strong>Linux</strong>: Run
       <code
-        >chmod +x ./LAN-Whiteboard-1.0.1-linux-x64.AppImage &amp;&amp;
-        ./LAN-Whiteboard-1.0.1-linux-x64.AppImage</code
+        >chmod +x ./LAN-Whiteboard-1.0.2-linux-x64.AppImage &amp;&amp;
+        ./LAN-Whiteboard-1.0.2-linux-x64.AppImage</code
       >
       (pass <code>--appimage-extract-and-run</code> if FUSE is unavailable).
     </p>

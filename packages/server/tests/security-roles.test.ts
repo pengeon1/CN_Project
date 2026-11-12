@@ -394,4 +394,45 @@ describe('Security and room roles', () => {
     const kicked = await reconnect.waitForError('JOIN_FAILED');
     expect((kicked.payload as { message: string }).message).toContain('removed from this room');
   });
+
+  it('assigns new joinees as VIEWER when defaultViewer is enabled', async () => {
+    const host = await connect('Host');
+    host.send(MessageType.CREATE_ROOM, {
+      roomName: 'Lecture Room',
+      username: 'Host',
+      defaultViewer: true,
+    });
+    const state = (
+      await host.waitFor((message) => message.type === MessageType.ROOM_STATE, 'room state')
+    ).payload as RoomStatePayload;
+    const room = server.roomManager.getRoom(state.roomCode)!;
+    expect(state.defaultViewer).toBe(true);
+    expect(room.defaultViewer).toBe(true);
+
+    const student = await connect('Student');
+    student.send(MessageType.JOIN_ROOM, { roomCode: state.roomCode, username: 'Student' });
+    const studentState = (
+      await student.waitFor((message) => message.type === MessageType.ROOM_STATE, 'student state')
+    ).payload as RoomStatePayload;
+    expect(studentState.participants.find((p) => p.id === student.userId)?.role).toBe(Role.VIEWER);
+
+    // Host toggles defaultViewer off via PERMISSION_CHANGE so subsequent joinees become EDITOR
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { defaultViewer: false },
+      { room: state.roomCode, user_id: host.userId },
+    );
+    await host.waitFor(
+      (message) => message.type === MessageType.PERMISSION_CHANGE,
+      'defaultViewer update',
+    );
+    expect(room.defaultViewer).toBe(false);
+
+    const coEditor = await connect('CoEditor');
+    coEditor.send(MessageType.JOIN_ROOM, { roomCode: state.roomCode, username: 'CoEditor' });
+    const editorState = (
+      await coEditor.waitFor((message) => message.type === MessageType.ROOM_STATE, 'editor state')
+    ).payload as RoomStatePayload;
+    expect(editorState.participants.find((p) => p.id === coEditor.userId)?.role).toBe(Role.EDITOR);
+  });
 });

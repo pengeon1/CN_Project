@@ -17,6 +17,7 @@ export interface ConnectOptions {
   roomCode?: string;
   password?: string;
   allowNameChanges?: boolean;
+  defaultViewer?: boolean;
 }
 
 export interface ConnectionStatusEvent {

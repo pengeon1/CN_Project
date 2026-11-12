@@ -57,6 +57,7 @@ export const RoomSnapshotSchema = z.object({
   chatHistory: z.array(ChatMessageSchema),
   locked: z.boolean(),
   allowNameChanges: z.boolean().optional().default(false),
+  defaultViewer: z.boolean().optional().default(false),
   presentation: z.lazy(() => PresentationPayloadSchema).optional(),
   createdAt: z.number().int().positive(),
 });

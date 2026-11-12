@@ -434,6 +434,7 @@ export class MainTcpClient {
             username: options.username,
             password,
             allowNameChanges: options.allowNameChanges ?? false,
+            defaultViewer: options.defaultViewer ?? false,
           },
           { user_id: this.userId },
         ),

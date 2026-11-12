@@ -28,6 +28,7 @@ const PersistedRoomSchema = z.object({
   hostUserId: z.string().uuid(),
   locked: z.boolean(),
   allowNameChanges: z.boolean().optional().default(false),
+  defaultViewer: z.boolean().optional().default(false),
   passwordHash: z.string().nullable(),
   seq: z.number().int().nonnegative(),
   baseSeq: z.number().int().nonnegative(),

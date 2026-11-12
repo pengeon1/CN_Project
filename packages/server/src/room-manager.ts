@@ -128,6 +128,7 @@ export class RoomManager {
     username: string,
     password?: string,
     allowNameChanges = false,
+    defaultViewer = false,
   ): Promise<Room> {
     const code = this.generateRoomCode();
     let passwordHash: string | null = null;
@@ -143,6 +144,7 @@ export class RoomManager {
       passwordHash,
       Date.now(),
       allowNameChanges,
+      defaultViewer,
     );
     room.setOnChange(this.onRoomChange);
     this.rooms.set(code, room);
@@ -169,6 +171,7 @@ export class RoomManager {
         state.passwordHash,
         state.createdAt,
         state.allowNameChanges ?? false,
+        state.defaultViewer ?? false,
       );
       room.restorePersistedState(state, { restoredFromDisk: true });
       room.setOnChange(this.onRoomChange);

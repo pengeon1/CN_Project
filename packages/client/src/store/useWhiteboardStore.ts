@@ -127,6 +127,7 @@ export interface WhiteboardState {
     isHost: boolean;
     locked: boolean;
     allowNameChanges?: boolean;
+    defaultViewer?: boolean;
     createdAt?: number;
     password?: string;
   } | null;
@@ -1503,6 +1504,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             isHost: myParticipant?.role === Role.HOST,
             locked: payload.locked,
             allowNameChanges: payload.allowNameChanges ?? false,
+            defaultViewer: payload.defaultViewer ?? false,
             createdAt: payload.createdAt,
             password: get().roomPassword,
           },
@@ -1859,6 +1861,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
                     payload.allowNameChanges !== undefined
                       ? payload.allowNameChanges
                       : state.roomInfo.allowNameChanges,
+                  defaultViewer:
+                    payload.defaultViewer !== undefined
+                      ? payload.defaultViewer
+                      : state.roomInfo.defaultViewer,
                 }
               : null,
             profileSettingsOpen:

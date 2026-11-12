@@ -62,6 +62,7 @@ export interface PersistedRoomState {
   hostUserId: string;
   locked: boolean;
   allowNameChanges?: boolean;
+  defaultViewer?: boolean;
   passwordHash: string | null;
   seq: number;
   baseSeq: number;
@@ -129,6 +130,7 @@ export class Room {
   public hostUserId: string;
   public locked: boolean = false;
   public allowNameChanges: boolean;
+  public defaultViewer: boolean;
   public passwordHash: string | null = null;
 
   /**
@@ -205,6 +207,7 @@ export class Room {
     passwordHash?: string | null,
     createdAt = Date.now(),
     allowNameChanges = false,
+    defaultViewer = false,
   ) {
     this.code = code;
     this.name = name;
@@ -212,6 +215,7 @@ export class Room {
     this.passwordHash = passwordHash ?? null;
     this.createdAt = createdAt;
     this.allowNameChanges = allowNameChanges;
+    this.defaultViewer = defaultViewer;
     this.logger = new Logger(`Room ${code}`);
   }
 
@@ -445,6 +449,7 @@ export class Room {
       hostUserId: this.hostUserId,
       locked: this.locked,
       allowNameChanges: this.allowNameChanges,
+      defaultViewer: this.defaultViewer,
       passwordHash: this.passwordHash,
       seq: this.seq,
       baseSeq: this.baseSeq,
@@ -486,6 +491,7 @@ export class Room {
     const previousHostUserId = this.hostUserId;
     const previousLocked = this.locked;
     const previousAllowNameChanges = this.allowNameChanges;
+    const previousDefaultViewer = this.defaultViewer;
     const previousPasswordHash = this.passwordHash;
     const previousProcessedOps = this.processedOps;
     this.hostUserId = options.preserveSequence ? previousHostUserId : state.hostUserId;
@@ -493,6 +499,9 @@ export class Room {
     this.allowNameChanges = options.preserveSequence
       ? previousAllowNameChanges
       : (state.allowNameChanges ?? false);
+    this.defaultViewer = options.preserveSequence
+      ? previousDefaultViewer
+      : (state.defaultViewer ?? false);
     this.passwordHash = options.preserveSequence ? previousPasswordHash : state.passwordHash;
     this.awaitingRestoredHost = options.restoredFromDisk ?? false;
     this.seq = options.preserveSequence ? Math.max(previousSeq, state.seq) : state.seq;
@@ -1335,7 +1344,9 @@ export class Room {
           : priorParticipant.role;
       assignedColor = priorParticipant.color;
     } else {
-      assignedRole = role ?? (this.participants.size === 0 ? Role.HOST : Role.EDITOR);
+      assignedRole =
+        role ??
+        (this.participants.size === 0 ? Role.HOST : this.defaultViewer ? Role.VIEWER : Role.EDITOR);
       assignedColor = session.color ?? this.pickColor();
     }
 
@@ -1521,6 +1532,11 @@ export class Room {
     this.notifyChanged();
   }
 
+  public setDefaultViewer(enabled: boolean): void {
+    this.defaultViewer = enabled;
+    this.notifyChanged();
+  }
+
   public renameParticipant(userId: string, username: string): boolean {
     const entry = this.participants.get(userId);
     if (!entry || entry.participant.username === username) return false;
@@ -1599,6 +1615,7 @@ export class Room {
       chatHistory: this.getChatHistory(),
       locked: this.locked,
       allowNameChanges: this.allowNameChanges,
+      defaultViewer: this.defaultViewer,
       presentation: this.presentation,
       createdAt: this.createdAt,
     };

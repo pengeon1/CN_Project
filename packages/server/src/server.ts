@@ -360,6 +360,7 @@ export class WhiteboardServer {
           username: string;
           password?: string;
           allowNameChanges?: boolean;
+          defaultViewer?: boolean;
         }>(MessageType.CREATE_ROOM, envelope.payload);
 
         const room = await this.roomManager.createRoom(
@@ -368,6 +369,7 @@ export class WhiteboardServer {
           payload.username,
           payload.password,
           payload.allowNameChanges,
+          payload.defaultViewer,
         );
 
         // Send ROOM_STATE snapshot to the host
@@ -553,12 +555,19 @@ export class WhiteboardServer {
             return;
           }
 
-          if (payload.lockRoom !== undefined || payload.allowNameChanges !== undefined) {
+          if (
+            payload.lockRoom !== undefined ||
+            payload.allowNameChanges !== undefined ||
+            payload.defaultViewer !== undefined
+          ) {
             if (payload.lockRoom !== undefined) {
               room.locked = payload.lockRoom;
             }
             if (payload.allowNameChanges !== undefined) {
               room.setAllowNameChanges(payload.allowNameChanges);
+            }
+            if (payload.defaultViewer !== undefined) {
+              room.setDefaultViewer(payload.defaultViewer);
             }
           } else if (payload.targetUserId) {
             const target = room.getParticipant(payload.targetUserId);

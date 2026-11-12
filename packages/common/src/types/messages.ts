@@ -148,6 +148,7 @@ export interface CreateRoomPayload {
   username: string;
   password?: string;
   allowNameChanges?: boolean;
+  defaultViewer?: boolean;
 }
 
 export interface JoinRoomPayload {
@@ -196,6 +197,7 @@ export interface PermissionChangePayload {
   newRole?: Role;
   lockRoom?: boolean;
   allowNameChanges?: boolean;
+  defaultViewer?: boolean;
   kick?: boolean;
   reason?: string;
 }

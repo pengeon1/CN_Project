@@ -1767,5 +1767,38 @@ describe('Client UI & Store Suite', () => {
       expect(useWhiteboardStore.getState().roomInfo?.allowNameChanges).toBe(false);
       expect(useWhiteboardStore.getState().profileSettingsOpen).toBe(false);
     });
+
+    it('renders and synchronizes default-joinees-to-viewer room setting', () => {
+      const hostId = generateUuid();
+      useWhiteboardStore.setState({
+        currentUser: { id: hostId, username: 'Host', color: '#000000', role: Role.HOST },
+        roomInfo: {
+          code: 'DEFV01',
+          name: 'Default Viewer Room',
+          isHost: true,
+          locked: false,
+          defaultViewer: false,
+        },
+      });
+
+      const toolbarHtml = renderToStaticMarkup(
+        React.createElement(LeftToolbarContent, {
+          ...useWhiteboardStore.getState(),
+          initialMoreMenuOpen: true,
+        }),
+      );
+      expect(toolbarHtml).toContain('Default Joinees to Viewer');
+
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { defaultViewer: true },
+            { room: 'DEFV01', user_id: hostId, seq: 1 },
+          ),
+        );
+      expect(useWhiteboardStore.getState().roomInfo?.defaultViewer).toBe(true);
+    });
   });
 });

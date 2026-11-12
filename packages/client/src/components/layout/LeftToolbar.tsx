@@ -67,6 +67,7 @@ export interface LeftToolbarProps {
     isHost: boolean;
     locked: boolean;
     allowNameChanges?: boolean;
+    defaultViewer?: boolean;
   } | null;
   showRemoteCursors: boolean;
   toggleRemoteCursors: () => void;
@@ -286,29 +287,53 @@ export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
             </button>
 
             {isHost(currentUser?.role) && (
-              <button
-                type="button"
-                role="switch"
-                aria-checked={Boolean(roomInfo?.allowNameChanges)}
-                onClick={() =>
-                  sendPermissionChange({ allowNameChanges: !roomInfo?.allowNameChanges })
-                }
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
-              >
-                <span className="flex items-center gap-2">
-                  <UserRoundPen className="h-4 w-4 text-sky-400" />
-                  <span>Allow Name Changes</span>
-                </span>
-                <span
-                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                    roomInfo?.allowNameChanges
-                      ? 'bg-sky-500/20 text-sky-300'
-                      : 'bg-slate-800 text-slate-500'
-                  }`}
+              <>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Boolean(roomInfo?.allowNameChanges)}
+                  onClick={() =>
+                    sendPermissionChange({ allowNameChanges: !roomInfo?.allowNameChanges })
+                  }
+                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
                 >
-                  {roomInfo?.allowNameChanges ? 'ON' : 'OFF'}
-                </span>
-              </button>
+                  <span className="flex items-center gap-2">
+                    <UserRoundPen className="h-4 w-4 text-sky-400" />
+                    <span>Allow Name Changes</span>
+                  </span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                      roomInfo?.allowNameChanges
+                        ? 'bg-sky-500/20 text-sky-300'
+                        : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {roomInfo?.allowNameChanges ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Boolean(roomInfo?.defaultViewer)}
+                  onClick={() => sendPermissionChange({ defaultViewer: !roomInfo?.defaultViewer })}
+                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+                >
+                  <span className="flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-indigo-400" />
+                    <span>Default Joinees to Viewer</span>
+                  </span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                      roomInfo?.defaultViewer
+                        ? 'bg-indigo-500/20 text-indigo-300'
+                        : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {roomInfo?.defaultViewer ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              </>
             )}
 
             {roomInfo?.allowNameChanges && (

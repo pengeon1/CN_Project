@@ -206,6 +206,7 @@ export interface RoomSnapshot {
   chatHistory: ChatMessage[];
   locked: boolean;
   allowNameChanges?: boolean;
+  defaultViewer?: boolean;
   presentation?: PresentationState;
   createdAt: number;
 }

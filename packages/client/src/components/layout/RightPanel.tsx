@@ -172,6 +172,26 @@ export const RightPanel: React.FC = () => {
       {/* Tab 2: Participants List */}
       {rightPanelTab === 'participants' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {currentUser?.role === Role.HOST && (
+            <label className="mb-2 flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-300">
+              <span>
+                <span className="block font-semibold text-slate-200">
+                  Default new joinees to Viewer
+                </span>
+                <span className="block text-[10px] text-slate-500">
+                  New participants join read-only until promoted.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={Boolean(roomInfo?.defaultViewer)}
+                onChange={(event) =>
+                  sendPermissionChange({ defaultViewer: event.currentTarget.checked })
+                }
+                className="h-4 w-4 accent-indigo-500"
+              />
+            </label>
+          )}
           {participants.map((p) => {
             const isMe = currentUser?.id === p.id;
             return (

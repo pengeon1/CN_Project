@@ -21,6 +21,7 @@ export const CreateRoomPayloadSchema = z.object({
   username: z.string().min(MIN_USERNAME_LENGTH).max(MAX_USERNAME_LENGTH),
   password: z.string().min(1).max(64).optional(),
   allowNameChanges: z.boolean().optional().default(false),
+  defaultViewer: z.boolean().optional().default(false),
 });
 
 export const JoinRoomPayloadSchema = z.object({
@@ -64,6 +65,7 @@ export const PermissionChangePayloadSchema = z
     newRole: RoleSchema.optional(),
     lockRoom: z.boolean().optional(),
     allowNameChanges: z.boolean().optional(),
+    defaultViewer: z.boolean().optional(),
     kick: z.boolean().optional(),
     reason: z.string().max(256).optional(),
   })
@@ -72,7 +74,9 @@ export const PermissionChangePayloadSchema = z
       payload.targetUserId !== undefined &&
       (payload.newRole !== undefined || payload.kick === true);
     const changesRoomSetting =
-      payload.lockRoom !== undefined || payload.allowNameChanges !== undefined;
+      payload.lockRoom !== undefined ||
+      payload.allowNameChanges !== undefined ||
+      payload.defaultViewer !== undefined;
     if (!changesParticipant && !changesRoomSetting) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

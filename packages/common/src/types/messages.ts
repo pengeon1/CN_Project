@@ -195,6 +195,7 @@ export interface PermissionChangePayload {
   targetUserId?: string;
   newRole?: Role;
   lockRoom?: boolean;
+  allowNameChanges?: boolean;
   kick?: boolean;
   reason?: string;
 }

@@ -63,6 +63,7 @@ export const PermissionChangePayloadSchema = z
     targetUserId: z.string().uuid().optional(),
     newRole: RoleSchema.optional(),
     lockRoom: z.boolean().optional(),
+    allowNameChanges: z.boolean().optional(),
     kick: z.boolean().optional(),
     reason: z.string().max(256).optional(),
   })
@@ -70,11 +71,12 @@ export const PermissionChangePayloadSchema = z
     const changesParticipant =
       payload.targetUserId !== undefined &&
       (payload.newRole !== undefined || payload.kick === true);
-    const changesLock = payload.lockRoom !== undefined;
-    if (!changesParticipant && !changesLock) {
+    const changesRoomSetting =
+      payload.lockRoom !== undefined || payload.allowNameChanges !== undefined;
+    if (!changesParticipant && !changesRoomSetting) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'A role change, kick, or room lock change is required',
+        message: 'A role change, kick, or room setting change is required',
       });
     }
     if (payload.kick && payload.newRole !== undefined) {
@@ -83,10 +85,10 @@ export const PermissionChangePayloadSchema = z
         message: 'A participant cannot be kicked and role-changed in the same request',
       });
     }
-    if (changesParticipant && changesLock) {
+    if (changesParticipant && changesRoomSetting) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Participant changes and room lock changes must be separate requests',
+        message: 'Participant changes and room setting changes must be separate requests',
       });
     }
     if (payload.reason !== undefined && payload.kick !== true) {

@@ -1516,6 +1516,11 @@ export class Room {
     return true;
   }
 
+  public setAllowNameChanges(allowed: boolean): void {
+    this.allowNameChanges = allowed;
+    this.notifyChanged();
+  }
+
   public renameParticipant(userId: string, username: string): boolean {
     const entry = this.participants.get(userId);
     if (!entry || entry.participant.username === username) return false;

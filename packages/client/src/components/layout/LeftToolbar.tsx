@@ -9,6 +9,8 @@ import {
   Circle,
   Crosshair,
   Eraser,
+  Eye,
+  EyeOff,
   FolderOpen,
   History,
   Image as ImageIcon,
@@ -23,9 +25,15 @@ import {
   StickyNote,
   Trash2,
   Type,
+  UserRoundPen,
   Workflow,
 } from 'lucide-react';
-import { canMutateCanvas, isHost, type Role } from '@cn-whiteboard/common';
+import {
+  canMutateCanvas,
+  isHost,
+  type PermissionChangePayload,
+  type Role,
+} from '@cn-whiteboard/common';
 import { type CanvasTool, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { insertImageFile } from '../canvas/imageInsert.js';
@@ -53,13 +61,24 @@ export interface LeftToolbarProps {
   activeTool: CanvasTool;
   setActiveTool: (tool: CanvasTool) => void;
   currentUser: { id: string; username: string; color: string; role: Role } | null;
-  roomInfo: { code: string; name: string; isHost: boolean; locked: boolean } | null;
+  roomInfo: {
+    code: string;
+    name: string;
+    isHost: boolean;
+    locked: boolean;
+    allowNameChanges?: boolean;
+  } | null;
+  showRemoteCursors: boolean;
+  toggleRemoteCursors: () => void;
+  sendPermissionChange: (payload: PermissionChangePayload) => void;
+  setProfileSettingsOpen: (open: boolean) => void;
   setClearModalOpen: (open: boolean) => void;
   resetView: () => void;
   setSearchOpen: (open: boolean) => void;
   setLoadModalOpen: (open: boolean) => void;
   setVersionsOpen: (open: boolean) => void;
   setShortcutsModalOpen: (open: boolean) => void;
+  initialMoreMenuOpen?: boolean;
 }
 
 export const LeftToolbar: React.FC = () => {
@@ -72,14 +91,19 @@ export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
   setActiveTool,
   currentUser,
   roomInfo,
+  showRemoteCursors,
+  toggleRemoteCursors,
+  sendPermissionChange,
+  setProfileSettingsOpen,
   setClearModalOpen,
   resetView,
   setSearchOpen,
   setLoadModalOpen,
   setVersionsOpen,
   setShortcutsModalOpen,
+  initialMoreMenuOpen = false,
 }) => {
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(initialMoreMenuOpen);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -176,7 +200,7 @@ export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
         </button>
 
         {moreMenuOpen && (
-          <div className="absolute left-10 bottom-0 z-50 w-56 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl text-slate-200 text-xs">
+          <div className="absolute left-10 bottom-0 z-50 w-64 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl text-slate-200 text-xs">
             <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-800 mb-1">
               Utilities &amp; Tools
             </div>
@@ -229,6 +253,77 @@ export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
               <History className="h-4 w-4 text-purple-400" />
               <span>Version History</span>
             </button>
+
+            <div className="my-1 h-[1px] bg-slate-800" />
+            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              Settings
+            </div>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showRemoteCursors}
+              onClick={toggleRemoteCursors}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+            >
+              <span className="flex items-center gap-2">
+                {showRemoteCursors ? (
+                  <Eye className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <EyeOff className="h-4 w-4 text-slate-500" />
+                )}
+                <span>Show Participant Cursors</span>
+              </span>
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                  showRemoteCursors
+                    ? 'bg-emerald-500/20 text-emerald-300'
+                    : 'bg-slate-800 text-slate-500'
+                }`}
+              >
+                {showRemoteCursors ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
+            {isHost(currentUser?.role) && (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(roomInfo?.allowNameChanges)}
+                onClick={() =>
+                  sendPermissionChange({ allowNameChanges: !roomInfo?.allowNameChanges })
+                }
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+              >
+                <span className="flex items-center gap-2">
+                  <UserRoundPen className="h-4 w-4 text-sky-400" />
+                  <span>Allow Name Changes</span>
+                </span>
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    roomInfo?.allowNameChanges
+                      ? 'bg-sky-500/20 text-sky-300'
+                      : 'bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  {roomInfo?.allowNameChanges ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            )}
+
+            {roomInfo?.allowNameChanges && (
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileSettingsOpen(true);
+                  setMoreMenuOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-800 transition text-slate-300 hover:text-white"
+              >
+                <UserRoundPen className="h-4 w-4 text-blue-400" />
+                <span>Change Display Name</span>
+              </button>
+            )}
 
             <div className="my-1 h-[1px] bg-slate-800" />
 

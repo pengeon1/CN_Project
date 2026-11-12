@@ -20,6 +20,7 @@ import {
 } from '../src/store/useWhiteboardStore.js';
 import { PropertyBarContent } from '../src/components/layout/PropertyBar.js';
 import { LeftToolbarContent } from '../src/components/layout/LeftToolbar.js';
+import { ConnectDialog } from '../src/components/dialogs/ConnectDialog.js';
 import { computeResizedObjectChanges, pickHandle } from '../src/components/canvas/shapes.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 import { shouldDismissOnOutsideEvent } from '../src/hooks/useClickOutside.js';
@@ -54,6 +55,7 @@ describe('Client UI & Store Suite', () => {
       connectModalOpen: false,
       profileSettingsOpen: false,
       isDarkTheme: false,
+      showRemoteCursors: true,
       objects: {},
       liveLocalStroke: null,
       remoteCursors: {},
@@ -1704,6 +1706,66 @@ describe('Client UI & Store Suite', () => {
           ),
         );
       expect(useWhiteboardStore.getState().activeTool).toBe('select');
+    });
+
+    it('moves room settings from login screen into toolbox utilities and toggles cursor visibility', () => {
+      const hostId = generateUuid();
+      useWhiteboardStore.setState({
+        connectModalOpen: true,
+        currentUser: { id: hostId, username: 'Host', color: '#000000', role: Role.HOST },
+        roomInfo: {
+          code: 'SET123',
+          name: 'Settings Room',
+          isHost: true,
+          locked: false,
+          allowNameChanges: false,
+        },
+        profileSettingsOpen: true,
+      });
+
+      const connectHtml = renderToStaticMarkup(React.createElement(ConnectDialog));
+      expect(connectHtml).not.toContain('Change settings');
+      expect(connectHtml).not.toContain('Allow participants to change their names');
+
+      const toolbarHtml = renderToStaticMarkup(
+        React.createElement(LeftToolbarContent, {
+          ...useWhiteboardStore.getState(),
+          initialMoreMenuOpen: true,
+        }),
+      );
+      expect(toolbarHtml).toContain('Show Participant Cursors');
+      expect(toolbarHtml).toContain('Allow Name Changes');
+
+      // Toggle local cursor visibility
+      expect(useWhiteboardStore.getState().showRemoteCursors).toBe(true);
+      useWhiteboardStore.getState().toggleRemoteCursors();
+      expect(useWhiteboardStore.getState().showRemoteCursors).toBe(false);
+      useWhiteboardStore.getState().setShowRemoteCursors(true);
+      expect(useWhiteboardStore.getState().showRemoteCursors).toBe(true);
+
+      // Incoming host setting change updates roomInfo.allowNameChanges and closes profile modal if disabled
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { allowNameChanges: true },
+            { room: 'SET123', user_id: hostId, seq: 1 },
+          ),
+        );
+      expect(useWhiteboardStore.getState().roomInfo?.allowNameChanges).toBe(true);
+
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { allowNameChanges: false },
+            { room: 'SET123', user_id: hostId, seq: 2 },
+          ),
+        );
+      expect(useWhiteboardStore.getState().roomInfo?.allowNameChanges).toBe(false);
+      expect(useWhiteboardStore.getState().profileSettingsOpen).toBe(false);
     });
   });
 });

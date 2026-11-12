@@ -179,6 +179,7 @@ export interface WhiteboardState {
   clearModalOpen: boolean;
   shortcutsModalOpen: boolean;
   isDarkTheme: boolean;
+  showRemoteCursors: boolean;
 
   // Actions
   setConnectionStatus: (status: ConnectionStatus, error?: string | null) => void;
@@ -200,6 +201,8 @@ export interface WhiteboardState {
   setShortcutsModalOpen: (open: boolean) => void;
   dismissAccessNotice: () => void;
   toggleTheme: () => void;
+  setShowRemoteCursors: (show: boolean) => void;
+  toggleRemoteCursors: () => void;
   sendChatMessage: (text: string) => void;
   sendPermissionChange: (payload: PermissionChangePayload) => void;
   updateUsername: (username: string) => void;
@@ -480,6 +483,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   clearModalOpen: false,
   shortcutsModalOpen: false,
   isDarkTheme: false,
+  showRemoteCursors: true,
 
   setConnectionStatus: (status, error = null) => {
     set({ connectionStatus: status, connectionError: error });
@@ -622,6 +626,14 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   toggleTheme: () => {
     set((state) => ({ isDarkTheme: !state.isDarkTheme }));
+  },
+
+  setShowRemoteCursors: (show) => {
+    set({ showRemoteCursors: show });
+  },
+
+  toggleRemoteCursors: () => {
+    set((state) => ({ showRemoteCursors: !state.showRemoteCursors }));
   },
 
   sendChatMessage: (text) => {
@@ -1843,8 +1855,14 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
                   ...state.roomInfo,
                   isHost: updatedCurrent?.role === Role.HOST,
                   locked: nextLocked,
+                  allowNameChanges:
+                    payload.allowNameChanges !== undefined
+                      ? payload.allowNameChanges
+                      : state.roomInfo.allowNameChanges,
                 }
               : null,
+            profileSettingsOpen:
+              payload.allowNameChanges === false ? false : state.profileSettingsOpen,
           };
         });
         break;

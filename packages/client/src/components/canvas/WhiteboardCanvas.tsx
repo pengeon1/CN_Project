@@ -327,6 +327,7 @@ export const WhiteboardCanvas: React.FC = () => {
     participants,
     currentUser,
     roomInfo,
+    showRemoteCursors,
     startDrawing,
     updateLocalLivePoint,
     appendDrawingPoints,
@@ -663,10 +664,12 @@ export const WhiteboardCanvas: React.FC = () => {
         continue; // drawn as a laser below instead of an arrow
       }
       lastRemoteLaserCoordsRef.current.delete(cursor.userId);
-      const sx = (cursor.x + panX) * zoom;
-      const sy = (cursor.y + panY) * zoom;
-      if (sx >= -50 && sx <= width + 50 && sy >= -50 && sy <= height + 50) {
-        renderRemoteCursor(ctx, cursor, sx, sy);
+      if (showRemoteCursors) {
+        const sx = (cursor.x + panX) * zoom;
+        const sy = (cursor.y + panY) * zoom;
+        if (sx >= -50 && sx <= width + 50 && sy >= -50 && sy <= height + 50) {
+          renderRemoteCursor(ctx, cursor, sx, sy);
+        }
       }
     }
 
@@ -727,6 +730,7 @@ export const WhiteboardCanvas: React.FC = () => {
     connectorHoverObjId,
     editor,
     selectedIds,
+    showRemoteCursors,
     imageData,
     imageTick,
   ]);

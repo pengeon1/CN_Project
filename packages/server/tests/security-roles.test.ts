@@ -220,6 +220,30 @@ describe('Security and room roles', () => {
     const error = await editor.waitForError('NAME_CHANGE_DISABLED');
     expect((error.payload as { message: string }).message).toContain('disabled');
     expect(room.getParticipant(editor.userId)?.username).toBe('Editor');
+
+    // Host enables name changes dynamically in-room via PERMISSION_CHANGE
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { allowNameChanges: true },
+      { room: state.roomCode, user_id: host.userId },
+    );
+    await host.waitFor((message) => message.type === MessageType.PERMISSION_CHANGE, 'enable names');
+    await editor.waitFor(
+      (message) => message.type === MessageType.PERMISSION_CHANGE,
+      'enable names broadcast',
+    );
+    expect(room.allowNameChanges).toBe(true);
+
+    editor.send(
+      MessageType.UPDATE_USERNAME,
+      { username: 'RenamedInRoom' },
+      { room: state.roomCode, user_id: editor.userId },
+    );
+    const renamed = await host.waitFor(
+      (message) => message.type === MessageType.PARTICIPANT_RENAMED,
+      'in-room rename',
+    );
+    expect(renamed.payload).toEqual({ userId: editor.userId, username: 'RenamedInRoom' });
   });
 
   it('rejects unauthenticated and viewer mutations and enforces host role, lock, and kick controls', async () => {

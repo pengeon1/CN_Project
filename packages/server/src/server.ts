@@ -553,8 +553,13 @@ export class WhiteboardServer {
             return;
           }
 
-          if (payload.lockRoom !== undefined) {
-            room.locked = payload.lockRoom;
+          if (payload.lockRoom !== undefined || payload.allowNameChanges !== undefined) {
+            if (payload.lockRoom !== undefined) {
+              room.locked = payload.lockRoom;
+            }
+            if (payload.allowNameChanges !== undefined) {
+              room.setAllowNameChanges(payload.allowNameChanges);
+            }
           } else if (payload.targetUserId) {
             const target = room.getParticipant(payload.targetUserId);
             if (!target) {

@@ -383,6 +383,7 @@ export const WhiteboardCanvas: React.FC = () => {
   const [draft, setDraft] = useState<ShapeObject | null>(null);
   const [snapAnchor, setSnapAnchor] = useState<AnchorPoint | null>(null);
   const [connectorHoverObjId, setConnectorHoverObjId] = useState<string | null>(null);
+  const [hoverHandle, setHoverHandle] = useState<HandleId | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [imageTick, setImageTick] = useState(0);
   const laserTrails = useRef<Map<string, LaserTrail>>(new Map());
@@ -1079,17 +1080,19 @@ export const WhiteboardCanvas: React.FC = () => {
       );
       if (file) {
         e.preventDefault();
+        setActiveTool('select');
         void insertImageFile(file);
       }
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, []);
+  }, [setActiveTool]);
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith('image/'));
     if (!file) return;
     e.preventDefault();
+    setActiveTool('select');
     void insertImageFile(file, screenToWorld(e.clientX, e.clientY));
   };
 
@@ -1168,6 +1171,26 @@ export const WhiteboardCanvas: React.FC = () => {
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       e.preventDefault();
       return;
+    }
+
+    // Direct resize handle hit on currently selected object:
+    // If a single object is selected and the user grabs one of its corner handles,
+    // allow resizing immediately then and there without requiring a manual switch to the select tool.
+    if (e.button === 0 && canEdit && selectedIds.length === 1) {
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      const sole = objects[selectedIds[0]!];
+      const handle =
+        sole && (sole.type === 'shape' || sole.type === 'image') && !isLinear(sole)
+          ? pickHandle(sole, x, y, zoom)
+          : null;
+      if (sole && handle) {
+        if (editor) closeEditor(true);
+        setActiveTool('select');
+        dragRef.current = { kind: 'resize', id: sole.id, handle };
+        containerRef.current?.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
     }
 
     // Pen tool draws freehand strokes
@@ -1434,6 +1457,24 @@ export const WhiteboardCanvas: React.FC = () => {
       }, 20);
     }
 
+    // Check if pointer is hovering over a resize handle of a selected object
+    if (
+      canEdit &&
+      selectedIds.length === 1 &&
+      !dragRef.current &&
+      !isDrawingRef.current &&
+      !isPanning
+    ) {
+      const sole = objects[selectedIds[0]!];
+      const handle =
+        sole && (sole.type === 'shape' || sole.type === 'image') && !isLinear(sole)
+          ? pickHandle(sole, x, y, zoom)
+          : null;
+      setHoverHandle(handle);
+    } else if (hoverHandle) {
+      setHoverHandle(null);
+    }
+
     // Select Tool: hit test for author hover attribution
     if (activeTool === 'select' && !isPanning && !isDrawingRef.current && !dragRef.current) {
       const closestStroke = pickTopmost(objects, x, y, 8 / zoom);
@@ -1540,6 +1581,7 @@ export const WhiteboardCanvas: React.FC = () => {
     setEraserPos(null);
     setSnapAnchor(null);
     setConnectorHoverObjId(null);
+    setHoverHandle(null);
     if (hoveredAuthor) {
       setHoveredAuthor(null);
     }
@@ -1591,13 +1633,17 @@ export const WhiteboardCanvas: React.FC = () => {
       className={`relative h-full w-full overflow-hidden touch-none outline-none ${
         isPanning
           ? 'cursor-grab active:cursor-grabbing'
-          : activeTool === 'pen' || activeTool === 'laser'
-            ? 'cursor-crosshair'
-            : activeTool === 'eraser'
-              ? 'cursor-none'
-              : activeTool === 'select'
-                ? 'cursor-default'
-                : 'cursor-crosshair'
+          : hoverHandle === 'nw' || hoverHandle === 'se'
+            ? 'cursor-nwse-resize'
+            : hoverHandle === 'ne' || hoverHandle === 'sw'
+              ? 'cursor-nesw-resize'
+              : activeTool === 'pen' || activeTool === 'laser'
+                ? 'cursor-crosshair'
+                : activeTool === 'eraser'
+                  ? 'cursor-none'
+                  : activeTool === 'select'
+                    ? 'cursor-default'
+                    : 'cursor-crosshair'
       }`}
     >
       <canvas

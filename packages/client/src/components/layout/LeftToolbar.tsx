@@ -157,11 +157,17 @@ export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
-          if (file) void insertImageFile(file);
+          if (file) {
+            setActiveTool('select');
+            void insertImageFile(file);
+          }
         }}
       />
       <button
-        onClick={() => fileInput.current?.click()}
+        onClick={() => {
+          setActiveTool('select');
+          fileInput.current?.click();
+        }}
         disabled={!canEdit}
         title={canEdit ? 'Insert Image (or drop / paste one)' : 'Insert Image (read-only)'}
         className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${

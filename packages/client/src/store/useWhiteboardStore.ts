@@ -1299,6 +1299,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
         [image.assetId]: `data:${image.mime};base64,${image.base64}`,
       },
       selectedIds: [object.id],
+      activeTool: 'select',
       undoStack: [...state.undoStack, op_id],
       redoStack: [],
     }));

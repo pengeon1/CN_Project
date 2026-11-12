@@ -119,7 +119,9 @@ export async function insertImageFile(file: File, at?: { x: number; y: number })
       centerX: center.x,
       centerY: center.y,
     });
-    if (!ok) {
+    if (ok) {
+      useWhiteboardStore.setState({ activeTool: 'select' });
+    } else {
       useWhiteboardStore.setState({
         accessNotice: {
           title: 'Cannot insert image',

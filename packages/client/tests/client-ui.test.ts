@@ -2167,5 +2167,100 @@ describe('Client UI & Store Suite', () => {
       expect(stateAfterEnd.accessNotice?.title).toBe('Session Ended');
       expect(stateAfterEnd.accessNotice?.message).toBe('Session ended by class instructor');
     });
+
+    it('sets activeTool to select and allows immediate resizing when an image is added or handle clicked', () => {
+      const sentEnvelopes: unknown[] = [];
+      const api = {
+        sendMessage: (envelope: unknown) => {
+          sentEnvelopes.push(envelope);
+          return Promise.resolve(true);
+        },
+        onMessage: () => () => undefined,
+        onStatus: () => () => undefined,
+        disconnect: () => Promise.resolve(),
+      } as unknown as ElectronWhiteboardAPI;
+      vi.stubGlobal('window', { electronAPI: api });
+
+      useWhiteboardStore.setState({
+        activeTool: 'pen',
+        currentUser: { id: 'user-1', username: 'Editor', color: '#3B82F6', role: Role.EDITOR },
+        roomInfo: { code: 'IMG123', name: 'Image Room', isHost: false, locked: false },
+        objects: {},
+        selectedIds: [],
+      });
+
+      // Add image to store
+      const added = useWhiteboardStore.getState().addImage({
+        assetId: 'test-asset-1',
+        mime: 'image/png',
+        base64:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        bytes: 68,
+        width: 400,
+        height: 300,
+        centerX: 200,
+        centerY: 150,
+      });
+
+      expect(added).toBe(true);
+      const state = useWhiteboardStore.getState();
+      expect(state.activeTool).toBe('select');
+      expect(state.selectedIds.length).toBe(1);
+
+      const imageId = state.selectedIds[0]!;
+      const imageObj = state.objects[imageId]!;
+      expect(imageObj.type).toBe('image');
+
+      // Verify that corner handle can be picked immediately
+      const nwHandle = pickHandle(imageObj, imageObj.x, imageObj.y, 1);
+      expect(nwHandle).toBe('nw');
+
+      const seHandle = pickHandle(
+        imageObj,
+        imageObj.x + imageObj.width,
+        imageObj.y + imageObj.height,
+        1,
+      );
+      expect(seHandle).toBe('se');
+
+      // Resize changes work directly on the image object
+      const resized = computeResizedObjectChanges(
+        imageObj,
+        'se',
+        imageObj.x + 500,
+        imageObj.y + 400,
+        state.objects,
+      );
+      expect(resized[imageId]).toBeDefined();
+      expect(resized[imageId]?.width).toBe(500);
+      expect(resized[imageId]?.height).toBe(400);
+
+      // Verify for shapes as well (e.g. rectangle)
+      const rectObj: WhiteboardObject = {
+        id: 'rect-1',
+        type: 'shape',
+        shapeType: 'rectangle',
+        x: 100,
+        y: 100,
+        width: 140,
+        height: 90,
+        authorId: 'user-1',
+        strokeColor: '#000000',
+        strokeWidth: 2,
+        seq: 1,
+        zIndex: 1,
+        updatedAt: 1,
+      };
+
+      const rectHandle = pickHandle(rectObj, 100, 100, 1);
+      expect(rectHandle).toBe('nw');
+
+      const rectResized = computeResizedObjectChanges(rectObj, 'se', 300, 250, {
+        [rectObj.id]: rectObj,
+      });
+      expect(rectResized['rect-1']).toBeDefined();
+      expect(rectResized['rect-1']?.width).toBe(200);
+      expect(rectResized['rect-1']?.height).toBe(150);
+    });
   });
 });

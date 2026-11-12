@@ -65,8 +65,8 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     title: 'Text & Sticky Notes',
     icon: <Type className="h-4 w-4 text-amber-400" />,
     items: [
-      { label: 'New line in note', keys: ['Shift', 'Enter'] },
-      { label: 'Finish editing note', keys: ['Ctrl', 'Enter'] },
+      { label: 'New line in text / note', keys: ['Shift', 'Enter'] },
+      { label: 'Finish editing & exit', keys: ['Enter'] },
       { label: 'Toggle shortcuts list', keys: ['?'] },
     ],
   },

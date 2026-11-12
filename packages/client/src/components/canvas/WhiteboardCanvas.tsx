@@ -968,6 +968,7 @@ export const WhiteboardCanvas: React.FC = () => {
       : editor.base;
     setEditor(null);
     setActiveTextEditor(null);
+    setActiveTool('select');
     if (!commit) return;
 
     // Text boxes grow with their content; sticky notes and shapes keep their size.
@@ -988,7 +989,6 @@ export const WhiteboardCanvas: React.FC = () => {
     } else if (text.trim() !== '') {
       const id = addShape({ ...base, text, height: grownHeight });
       if (id) setSelectedIds([id]);
-      setActiveTool('select');
     }
   };
 
@@ -1630,10 +1630,15 @@ export const WhiteboardCanvas: React.FC = () => {
             (editorBounds.w - (isSticky ? 16 : 0)) * zoom,
             centered ? 48 : 120,
           );
-          const boxHeight = Math.max(
-            (editorBounds.h - (isSticky ? 16 : 0)) * zoom,
-            centered ? 32 : 38,
-          );
+          const lineCount = editorText.split('\n').length;
+          const boxHeight =
+            effectiveEditorBase.shapeType === 'text'
+              ? Math.max(
+                  (editorBounds.h - (isSticky ? 16 : 0)) * zoom,
+                  (lineCount * (effectiveEditorBase.fontSize ?? 16) * 1.3 + 16) * zoom,
+                  38,
+                )
+              : Math.max((editorBounds.h - (isSticky ? 16 : 0)) * zoom, centered ? 32 : 38);
           const textAlign =
             effectiveEditorBase.align ?? defaultShapeAlign(effectiveEditorBase.shapeType);
           const placeholder =
@@ -1698,13 +1703,12 @@ export const WhiteboardCanvas: React.FC = () => {
                   e.stopPropagation();
                   if (e.key === 'Escape') {
                     closeEditor(false);
+                    containerRef.current?.focus();
                   } else if (e.key === 'Enter') {
-                    if (effectiveEditorBase.shapeType === 'text' && !e.shiftKey) {
+                    if (!e.shiftKey) {
                       e.preventDefault();
                       closeEditor(true);
-                    } else if (e.ctrlKey || e.metaKey) {
-                      e.preventDefault();
-                      closeEditor(true);
+                      containerRef.current?.focus();
                     }
                   }
                 }}

@@ -15,6 +15,7 @@ import {
   Check,
   ChevronDown,
   Italic,
+  Palette,
   SendToBack,
   Trash2,
   Type,
@@ -22,6 +23,7 @@ import {
 import type { ShapeObject } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
+import { HexColorPicker } from './HexColorPicker.js';
 import {
   colorChanges,
   defaultShapeAlign,
@@ -39,17 +41,6 @@ const PALETTE_SWATCHES = [
   '#18A0FB', // Blue
   '#8B5CF6', // Purple
   '#EC4899', // Pink
-];
-
-const FILL_TINT_SWATCHES = [
-  '#FFFFFF', // White
-  '#F1F5F9', // Slate
-  '#DBEAFE', // Soft Blue
-  '#DCFCE7', // Soft Green
-  '#FEF9C3', // Soft Yellow
-  '#FEE2E2', // Soft Red
-  '#F3E8FF', // Soft Purple
-  '#FCE7F3', // Soft Pink
 ];
 
 const STROKE_WIDTHS = [
@@ -112,12 +103,17 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
   const [fillMenuOpen, setFillMenuOpen] = useState(false);
   const fillPickerRef = useRef<HTMLDivElement | null>(null);
 
-  // Close the fill popover whenever tool, selection, or text edit target changes.
+  const [strokeMenuOpen, setStrokeMenuOpen] = useState(false);
+  const strokePickerRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the popovers whenever tool, selection, or text edit target changes.
   useEffect(() => {
     setFillMenuOpen(false);
+    setStrokeMenuOpen(false);
   }, [activeTool, selectedIds, activeTextEditor?.objectId]);
 
   useClickOutside(fillMenuOpen, fillPickerRef, () => setFillMenuOpen(false));
+  useClickOutside(strokeMenuOpen, strokePickerRef, () => setStrokeMenuOpen(false));
 
   const editingLiveText = activeTextEditor !== null;
   const selection = selectedIds.map((id) => objects[id]).filter((o) => o !== undefined);
@@ -334,6 +330,10 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
     first?.type === 'shape' &&
     !isLinear(first);
 
+  const isCustomStrokeColor = !PALETTE_SWATCHES.some(
+    (c) => c.toUpperCase() === current.color.toUpperCase(),
+  );
+
   return (
     <div
       data-property-bar="true"
@@ -349,7 +349,7 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
       onClick={(e) => e.stopPropagation()}
       className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex max-w-[calc(100%-200px)] flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/95 px-3 py-1.5 shadow-xl backdrop-blur-xl select-none"
     >
-      {/* Stroke / Text Color Swatches */}
+      {/* Stroke / Text Color Swatches & Hex GUI Palette */}
       <div className="flex items-center gap-1.5">
         {PALETTE_SWATCHES.map((color) => {
           const isSelected = current.color.toUpperCase() === color.toUpperCase();
@@ -368,6 +368,41 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
             />
           );
         })}
+
+        {/* Hex Choosable GUI Palette Button & Popover */}
+        <div ref={strokePickerRef} className="relative flex items-center">
+          <button
+            type="button"
+            onClick={() => setStrokeMenuOpen((v) => !v)}
+            title={`More colors & custom hex (current: ${current.color})`}
+            aria-label="Color Palette"
+            className={`flex h-6 items-center gap-1 rounded-lg border px-1.5 py-0.5 text-xs font-medium transition ${
+              strokeMenuOpen
+                ? 'border-blue-500 bg-blue-600/30 text-blue-300'
+                : isCustomStrokeColor
+                  ? 'border-blue-500/80 bg-slate-800 text-slate-100 ring-1 ring-blue-500/50'
+                  : 'border-slate-700/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+            }`}
+          >
+            <span
+              className="h-3.5 w-3.5 rounded-full border border-slate-500/80 shrink-0 shadow-sm"
+              style={{ backgroundColor: current.color }}
+            />
+            <Palette className="h-3 w-3" />
+            <span className="font-mono text-[10px] tracking-tight uppercase">{current.color}</span>
+          </button>
+
+          {strokeMenuOpen && (
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30">
+              <HexColorPicker
+                label="Stroke & Text Color"
+                currentColor={current.color}
+                onChangeColor={(hex) => setColor(hex)}
+                onClose={() => setStrokeMenuOpen(false)}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Stroke Width Buttons */}
@@ -445,84 +480,18 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
             {fillMenuOpen && (
               <div
                 data-property-bar="true"
-                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 w-56 rounded-xl border border-slate-700/90 bg-slate-900/98 p-2.5 shadow-2xl backdrop-blur-xl"
+                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30"
               >
-                <div className="mb-1.5 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  <span>Fill Color</span>
-                  {canClearFill && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFillColor(null);
-                        setFillMenuOpen(false);
-                      }}
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition ${
-                        !current.fillColor
-                          ? 'bg-blue-600/30 text-blue-300'
-                          : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                      }`}
-                    >
-                      No Fill
-                    </button>
-                  )}
-                </div>
-                <div className="mb-2 grid grid-cols-8 gap-1">
-                  {FILL_TINT_SWATCHES.map((hex) => {
-                    const active = current.fillColor?.toUpperCase() === hex.toUpperCase();
-                    return (
-                      <button
-                        key={`tint-${hex}`}
-                        type="button"
-                        onClick={() => {
-                          setFillColor(hex);
-                          setFillMenuOpen(false);
-                        }}
-                        style={{ backgroundColor: hex }}
-                        title={`Fill tint: ${hex}`}
-                        className={`h-5 w-5 rounded-md border border-slate-600 transition ${
-                          active
-                            ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-slate-900 scale-110'
-                            : 'hover:scale-110'
-                        }`}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="mb-2 grid grid-cols-8 gap-1">
-                  {PALETTE_SWATCHES.map((hex) => {
-                    const active = current.fillColor?.toUpperCase() === hex.toUpperCase();
-                    return (
-                      <button
-                        key={`solid-${hex}`}
-                        type="button"
-                        onClick={() => {
-                          setFillColor(hex);
-                          setFillMenuOpen(false);
-                        }}
-                        style={{ backgroundColor: hex }}
-                        title={`Fill color: ${hex}`}
-                        className={`h-5 w-5 rounded-md border border-slate-600 transition ${
-                          active
-                            ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-slate-900 scale-110'
-                            : 'hover:scale-110'
-                        }`}
-                      />
-                    );
-                  })}
-                </div>
-                <label className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-700/80 bg-slate-800/70 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800">
-                  <span>Custom color</span>
-                  <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-400">
-                    <span>{current.fillColor ?? 'None'}</span>
-                    <input
-                      type="color"
-                      aria-label="Custom fill color"
-                      value={current.fillColor ?? '#DBEAFE'}
-                      onChange={(e) => setFillColor(e.target.value.toUpperCase())}
-                      className="h-5 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
-                    />
-                  </span>
-                </label>
+                <HexColorPicker
+                  label="Shape Fill Color"
+                  currentColor={current.fillColor}
+                  onChangeColor={(hex) => setFillColor(hex)}
+                  onClearColor={() => setFillColor(null)}
+                  canClear={canClearFill}
+                  clearLabel="No Fill"
+                  showTints={true}
+                  onClose={() => setFillMenuOpen(false)}
+                />
               </div>
             )}
           </div>
@@ -609,7 +578,7 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
                   );
                   surface?.focus();
                 }}
-                title="Finish typing (Ctrl+Enter)"
+                title="Finish typing & exit (Enter, or Shift+Enter for new line)"
                 className="ml-1 flex items-center gap-1 rounded-md bg-emerald-600/90 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-500 transition"
               >
                 <Check className="h-3 w-3" />

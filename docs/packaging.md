@@ -32,11 +32,11 @@ npm run smoke:server -- release/server/whiteboard-server-linux-x64   # verify an
 
 ## What CI does
 
-- **`ci.yml`**: on every push/PR to `main`, format check, lint, tests and build on Windows, Linux and macOS. On pushes to `main` (and manual runs) a second `package` job builds the server executable, **smoke-tests it** (starts it, completes a TCP `HELLO`/`AUTH_OK` handshake and a UDP discovery probe), builds the client installers, and uploads both as artifacts (kept 14 days) from the run's _Artifacts_ section.
+- **`ci.yml`**: on every push/PR to `main`, format check, lint, tests and build on Windows, Linux and macOS. On pushes to `main` (and manual runs) a second `package` job builds the server executable, **smoke-tests it** (starts it, completes a TCP `HELLO`/`AUTH_OK` handshake and a UDP discovery probe), builds the client installers, verifies macOS `.app` ad-hoc signatures (`codesign --verify --deep --strict`) and `.dmg` images (`hdiutil verify`), and uploads both as artifacts (kept 14 days) from the run's _Artifacts_ section.
 - **`release.yml`**: pushing a tag `vX.Y.Z` runs the same build and verification matrix across all three OSes, then a final `publish` job downloads every artifact, generates `SHA256SUMS.txt` checksums, renders the curated release write-up from `.github/release-body.md`, and publishes **one GitHub Release** using that release overview (with auto-generated commit/contributor lists disabled).
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0     # publishes a release
+git tag v1.0.1 && git push origin v1.0.1     # publishes a release
 ```
 
 ## Running the server
@@ -61,16 +61,49 @@ Ports: **TCP 4000** (or your `--port`) for the whiteboard; **UDP 45454** only fo
 
 The **client** only makes outgoing connections, so it normally triggers no firewall prompt (it uses a short-lived outgoing UDP socket for discovery).
 
-## Unsigned apps: SmartScreen and Gatekeeper
+## Unsigned & Ad-Hoc Signed Apps: Step-by-Step First-Run Guide
 
-These builds are **not code-signed** (signing needs paid certificates), so operating systems warn on first launch. This is expected for a CS3004 course lab build.
+These academic builds do not use paid Apple Developer / Authenticode certificates (`CSC_IDENTITY_AUTO_DISCOVERY=false`), so macOS builds are **ad-hoc signed inside-out** during packaging (`scripts/mac-adhoc-sign.mjs`) and verified with `codesign --verify --deep --strict` + `hdiutil verify`. Because downloads from a browser still carry quarantine/SmartScreen metadata, follow these exact first-run steps per OS:
 
-- **Windows SmartScreen** ("Windows protected your PC"): click **More info → Run anyway**. For the portable `.exe` or the server, the same prompt appears once per downloaded file. Right-click the file → _Properties_ → tick **Unblock** to avoid it.
-- **macOS Gatekeeper** ("cannot be opened because the developer cannot be verified" / "is damaged"):
-  - **Client app**: open the `.dmg`, drag the app to _Applications_, then **right-click the app → Open → Open** (once). If macOS says it is damaged, remove the download quarantine flag: `xattr -dr com.apple.quarantine "/Applications/LAN Whiteboard.app"`. Alternatively _System Settings → Privacy & Security → Open Anyway_.
-  - **Server binary**: `chmod +x whiteboard-server-macos-arm64 && xattr -d com.apple.quarantine whiteboard-server-macos-arm64`, then run from Terminal. Use `macos-arm64` on Apple Silicon and `macos-x64` on Intel Macs.
-- **Linux AppImage**: `chmod +x LAN-Whiteboard-*.AppImage` then run it. If it fails with a FUSE error (common on Ubuntu 22.04+), run it with `--appimage-extract-and-run`, or install `libfuse2`. The Electron sandbox may also need `--no-sandbox` on systems without user namespaces.
-- **Linux server**: `chmod +x whiteboard-server-linux-x64`.
+### Windows (x64)
+
+1. **Server** _(host machine only)_: Run `.\whiteboard-server-win-x64.exe --port 4000 --data-dir ./data` in PowerShell. If Windows Defender Firewall prompts, allow **Private networks**.
+2. **Client**: Run `LAN-Whiteboard-<v>-win-x64-nsis.exe` (or `-portable.exe`).
+3. If **Windows SmartScreen** appears (_"Windows protected your PC"_), click **More info -> Run anyway** _(or right-click the file -> **Properties** -> check **Unblock** before running)_.
+
+### macOS (Apple Silicon `arm64` & Intel `x64`)
+
+1. **Server** _(host machine only)_:
+   ```bash
+   chmod +x ./whiteboard-server-macos-*
+   xattr -cr ./whiteboard-server-macos-*
+   ./whiteboard-server-macos-arm64 --port 4000 --data-dir ./data   # use -x64 on Intel Macs
+   ```
+   Click **Allow** when macOS asks whether to allow incoming network connections.
+2. **Client**:
+   - Download `LAN-Whiteboard-<v>-mac-arm64.dmg` (Apple Silicon M1/M2/M3/M4) or `-x64.dmg` (Intel), or the matching `.zip`.
+   - If your browser quarantined the `.dmg` download so Finder refuses to mount it, run `xattr -cr ~/Downloads/LAN-Whiteboard-*-mac-*.dmg` first.
+   - Open the `.dmg` (or extract the `.zip`) and drag **`LAN Whiteboard.app`** into **Applications**.
+   - Clear the quarantine attribute once and launch:
+     ```bash
+     xattr -cr "/Applications/LAN Whiteboard.app"
+     open "/Applications/LAN Whiteboard.app"
+     ```
+   - Alternatively, **right-click -> Open** or enable it under **System Settings -> Privacy & Security -> Open Anyway**.
+
+### Linux (x64)
+
+1. **Server** _(host machine only)_: Allow TCP `4000` and UDP `45454` in `ufw`/`firewalld`, then run:
+   ```bash
+   chmod +x ./whiteboard-server-linux-x64
+   ./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
+   ```
+2. **Client**:
+   ```bash
+   chmod +x ./LAN-Whiteboard-<v>-linux-x64.AppImage
+   ./LAN-Whiteboard-<v>-linux-x64.AppImage
+   ```
+   If FUSE (`libfuse2`) is missing (Ubuntu 22.04+/24.04+), pass `--appimage-extract-and-run` (and add `--no-sandbox` if unprivileged user namespaces are disabled).
 
 ## Verifying on a clean, offline machine
 

@@ -115,7 +115,7 @@
     <h1>LAN-Based Multi-User Collaborative Whiteboard: Technical Documentation &amp; User Guide</h1>
     <p><strong>Course</strong>: Computer Networks Practice (CS3004)</p>
     <p><strong>Academic Year</strong>: 2026-2027</p>
-    <p><strong>Document Revision</strong>: 1.0.0</p>
+    <p><strong>Document Revision</strong>: 1.0.1</p>
     <p><strong>Deliverable</strong>: Comprehensive Technical Report &amp; User Guide</p>
     <hr />
     <h2>Abstract</h2>
@@ -464,16 +464,18 @@ class Room {
     <hr />
     <h2>8. User Guide &amp; Operating Instructions</h2>
     <h3>8.1 Starting the Server</h3>
-    <p>Run the standalone server executable from the command line:</p>
+    <p>Run the standalone server executable from the command line on one host machine:</p>
     <pre><code class="lang-bash">
-# Windows
+# Windows (PowerShell - allow Private Networks in Firewall prompt)
 .\whiteboard-server-win-x64.exe --port 4000 --data-dir ./data
 
-# Linux
-./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
-
-# macOS
+# macOS (Apple Silicon arm64 or Intel x64)
+chmod +x ./whiteboard-server-macos-* &amp;&amp; xattr -cr ./whiteboard-server-macos-*
 ./whiteboard-server-macos-arm64 --port 4000 --data-dir ./data
+
+# Linux (allow TCP 4000 &amp; UDP 45454 in firewall)
+chmod +x ./whiteboard-server-linux-x64
+./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
 </code></pre>
     <p>The server displays its LAN IP addresses on startup:</p>
     <pre><code class="lang-text">
@@ -482,20 +484,34 @@ class Room {
 [INFO] [TCPServer]   -&gt; tcp://192.168.1.105:4000
 [INFO] [Discovery] LAN discovery listening on udp/45454
 </code></pre>
-    <h3>8.2 Connecting Clients</h3>
+    <h3>8.2 Installing &amp; Connecting Clients (Per OS)</h3>
     <p>
-      1. Launch the <code>LAN Whiteboard</code> desktop app on any client computer connected to the
-      same LAN.
-    </p>
-    <p>2. Enter your display name.</p>
-    <p>
-      3. <strong>Auto-Discovery</strong>: Choose <strong>Find servers on this network</strong> to
-      detect active servers automatically via UDP broadcast.
+      1. <strong>Windows</strong>: Run <code>LAN-Whiteboard-1.0.1-win-x64-nsis.exe</code> (or
+      <code>-portable.exe</code>). If Windows SmartScreen appears, click
+      <strong>More info -&gt; Run anyway</strong>.
     </p>
     <p>
-      4. <strong>Manual Connection</strong>: If UDP is blocked on your router, select
-      <strong>Manual IP Address</strong> and enter the server's IP (e.g.,
-      <code>192.168.1.105</code>) and Port (<code>4000</code>).
+      2. <strong>macOS</strong>: Open <code>LAN-Whiteboard-1.0.1-mac-arm64.dmg</code> (or
+      <code>-x64.dmg</code> / <code>.zip</code>; run
+      <code>xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg</code> if quarantined), drag
+      <strong><code>LAN Whiteboard.app</code></strong> to <strong>Applications</strong>, then run
+      <code
+        >xattr -cr "/Applications/LAN Whiteboard.app" &amp;&amp; open "/Applications/LAN
+        Whiteboard.app"</code
+      >.
+    </p>
+    <p>
+      3. <strong>Linux</strong>: Run
+      <code
+        >chmod +x ./LAN-Whiteboard-1.0.1-linux-x64.AppImage &amp;&amp;
+        ./LAN-Whiteboard-1.0.1-linux-x64.AppImage</code
+      >
+      (pass <code>--appimage-extract-and-run</code> if FUSE is unavailable).
+    </p>
+    <p>
+      4. Enter your display name, select an auto-discovered server under
+      <strong>Find servers on this network</strong> (or enter IP + port <code>4000</code> manually),
+      and create or join a room.
     </p>
     <h3>8.3 Hosting and Joining Sessions</h3>
     <ul>

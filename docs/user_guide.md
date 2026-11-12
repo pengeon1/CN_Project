@@ -104,12 +104,18 @@ To allow incoming TCP connections from other LAN devices:
 
 ### 3.1 Launching the Desktop Client
 
-Install and open the client app on your operating system:
+Install and open the client app on your operating system (`1.0.1`):
 
-- **Windows**: Run `LAN-Whiteboard-1.0.0-win-x64-nsis.exe` (or the standalone `LAN-Whiteboard-1.0.0-win-x64-portable.exe`).
-  - _SmartScreen Note_: If Windows displays _"Windows protected your PC"_, click **More info** -> **Run anyway** (standard for unsigned CS3004 lab binaries).
-- **macOS**: Open `LAN-Whiteboard-1.0.0-mac-arm64.dmg` (Apple Silicon) or `LAN-Whiteboard-1.0.0-mac-x64.dmg` (Intel), drag the app to _Applications_, and right-click -> **Open**.
-- **Linux**: Run `LAN-Whiteboard-1.0.0-linux-x64.AppImage` (`chmod +x` may be required; pass `--appimage-extract-and-run` if FUSE is unavailable).
+1. **Windows (`x64`)**:
+   - Run `LAN-Whiteboard-1.0.1-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.1-win-x64-portable.exe` (standalone portable binary).
+   - If **Windows SmartScreen** displays _"Windows protected your PC"_, click **More info** -> **Run anyway**.
+2. **macOS (`arm64` Apple Silicon / `x64` Intel)**:
+   - Open `LAN-Whiteboard-1.0.1-mac-arm64.dmg` (M1/M2/M3/M4) or `LAN-Whiteboard-1.0.1-mac-x64.dmg` (Intel), or extract the matching `.zip` archive.
+   - If your browser quarantined the `.dmg`, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg` in Terminal before opening it.
+   - Drag **`LAN Whiteboard.app`** to **Applications**, clear browser quarantine once (`xattr -cr "/Applications/LAN Whiteboard.app"`), and open it (`open "/Applications/LAN Whiteboard.app"` or **System Settings -> Privacy & Security -> Open Anyway**).
+3. **Linux (`x64`)**:
+   - Mark executable and run: `chmod +x LAN-Whiteboard-1.0.1-linux-x64.AppImage && ./LAN-Whiteboard-1.0.1-linux-x64.AppImage`.
+   - If FUSE (`libfuse2`) is missing (Ubuntu 22.04+/24.04+), pass `--appimage-extract-and-run` (and add `--no-sandbox` if user namespaces are restricted).
 
 ### 3.2 Connect Dialog: Automatic Discovery & Manual Connect
 

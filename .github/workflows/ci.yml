@@ -98,6 +98,19 @@ jobs:
       - name: Build desktop client installers
         run: npm run package:client
 
+      - name: Verify macOS app signatures and DMG images
+        if: matrix.os == 'macos-latest'
+        run: |
+          shopt -s nullglob
+          for app in release/client/mac*/*.app; do
+            echo "Verifying code signature: $app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done
+          for dmg in release/client/*.dmg; do
+            echo "Verifying DMG integrity: $dmg"
+            hdiutil verify "$dmg"
+          done
+
       - name: Upload server executables
         uses: actions/upload-artifact@v4
         with:

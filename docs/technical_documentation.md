@@ -2,7 +2,7 @@
 
 **Course**: Computer Networks Practice (CS3004)  
 **Academic Year**: 2026-2027  
-**Document Revision**: 1.0.0  
+**Document Revision**: 1.0.1  
 **Deliverable**: Comprehensive Technical Report & User Guide
 
 ---
@@ -222,17 +222,19 @@ Unlike single-user applications where undo pops the global history stack, our sy
 
 ### 8.1 Starting the Server
 
-Run the standalone server executable from the command line:
+Run the standalone server executable from the command line on one host machine:
 
 ```bash
-# Windows
+# Windows (PowerShell - allow Private Networks in Firewall prompt)
 .\whiteboard-server-win-x64.exe --port 4000 --data-dir ./data
 
-# Linux
-./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
-
-# macOS
+# macOS (Apple Silicon arm64 or Intel x64)
+chmod +x ./whiteboard-server-macos-* && xattr -cr ./whiteboard-server-macos-*
 ./whiteboard-server-macos-arm64 --port 4000 --data-dir ./data
+
+# Linux (allow TCP 4000 & UDP 45454 in firewall)
+chmod +x ./whiteboard-server-linux-x64
+./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
 ```
 
 The server displays its LAN IP addresses on startup:
@@ -244,12 +246,12 @@ The server displays its LAN IP addresses on startup:
 [INFO] [Discovery] LAN discovery listening on udp/45454
 ```
 
-### 8.2 Connecting Clients
+### 8.2 Installing & Connecting Clients (Per OS)
 
-1. Launch the `LAN Whiteboard` desktop app on any client computer connected to the same LAN.
-2. Enter your display name.
-3. **Auto-Discovery**: Choose **Find servers on this network** to detect active servers automatically via UDP broadcast.
-4. **Manual Connection**: If UDP is blocked on your router, select **Manual IP Address** and enter the server's IP (e.g., `192.168.1.105`) and Port (`4000`).
+1. **Windows**: Run `LAN-Whiteboard-1.0.1-win-x64-nsis.exe` (or `-portable.exe`). If Windows SmartScreen appears, click **More info -> Run anyway**.
+2. **macOS**: Open `LAN-Whiteboard-1.0.1-mac-arm64.dmg` (or `-x64.dmg` / `.zip`; run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg` if quarantined), drag **`LAN Whiteboard.app`** to **Applications**, then run `xattr -cr "/Applications/LAN Whiteboard.app" && open "/Applications/LAN Whiteboard.app"`.
+3. **Linux**: Run `chmod +x ./LAN-Whiteboard-1.0.1-linux-x64.AppImage && ./LAN-Whiteboard-1.0.1-linux-x64.AppImage` (pass `--appimage-extract-and-run` if FUSE is unavailable).
+4. Enter your display name, select an auto-discovered server under **Find servers on this network** (or enter IP + port `4000` manually), and create or join a room.
 
 ### 8.3 Hosting and Joining Sessions
 

@@ -1,6 +1,6 @@
 {
   "name": "@cn-whiteboard/common",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Shared wire framing, protocol schemas, and types for CS3004 LAN Collaborative Whiteboard",
   "type": "module",

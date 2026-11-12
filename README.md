@@ -42,25 +42,53 @@ Prebuilt, self-contained executables (server + desktop client for Windows, Linux
 | **macOS (Apple Silicon / Intel)** | `whiteboard-server-macos-arm64` / `-x64` | `LAN-Whiteboard-<version>-mac-<arch>.dmg` or `.zip`                        |
 | **Linux (x64)**                   | `whiteboard-server-linux-x64`            | `LAN-Whiteboard-<version>-linux-x64.AppImage`                              |
 
-### Running Downloaded Binaries (No Build Needed)
+### Running Downloaded Binaries (Step-by-Step by OS)
 
-1. **Start the server** on one machine on the LAN:
-   ```bash
-   # Linux / macOS (make executable once)
-   chmod +x ./whiteboard-server-*
-   ./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
+Download the release binaries from [GitHub Releases](https://github.com/pengeon1/CN_Project/releases) (`1.0.1` filenames below). Start **one server** on a host machine on your LAN, then run the **client** on each participant's machine.
 
-   # Windows PowerShell
+#### Windows (x64)
+
+1. Start the server in PowerShell:
+   ```powershell
    .\whiteboard-server-win-x64.exe --port 4000 --data-dir ./data
    ```
-   The server prints its active LAN IPv4 addresses (e.g. `192.168.1.x:4000`). Allow inbound **TCP `4000`** (and **UDP `45454`** for auto-discovery) if prompted by your firewall.
-2. **Launch the client** (`LAN Whiteboard`) on participant machines, pick the server under **Find servers on this network** (or enter its IP/port manually), and create or join a room with the 6-character code (+ optional password).
+   Allow **Private networks** when Windows Defender Firewall prompts (TCP `4000` & UDP `45454`).
+2. Run `LAN-Whiteboard-1.0.1-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.1-win-x64-portable.exe`. If Windows SmartScreen appears, click **More info** -> **Run anyway**.
+3. Pick the discovered server (or enter the host LAN IP & port `4000`) and create or join a room.
 
-See [`docs/packaging.md`](docs/packaging.md) for checksum verification, local packaging commands, and first-run Windows SmartScreen / macOS Gatekeeper / Linux FUSE instructions.
+#### macOS (Apple Silicon `arm64` & Intel `x64`)
 
-```bash
-npm run package:server && npm run package:client   # build standalone executables locally
-```
+1. _(Host machine only)_ Make the server executable, clear browser quarantine, and start it:
+   ```bash
+   chmod +x ./whiteboard-server-macos-*
+   xattr -cr ./whiteboard-server-macos-*
+   ./whiteboard-server-macos-arm64 --port 4000 --data-dir ./data   # use -x64 on Intel Macs
+   ```
+   Click **Allow** when macOS asks to allow incoming network connections.
+2. Open `LAN-Whiteboard-1.0.1-mac-arm64.dmg` (or `-x64.dmg`; if macOS blocked the `.dmg` download, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.1-mac-*.dmg` first) and drag **`LAN Whiteboard.app`** to **Applications** (or extract the `.zip`).
+3. Clear the download quarantine flag once (builds are ad-hoc signed without paid Apple notarization) and open the app:
+   ```bash
+   xattr -cr "/Applications/LAN Whiteboard.app"
+   open "/Applications/LAN Whiteboard.app"
+   ```
+4. Pick the discovered server (or enter the host LAN IP & port `4000`) and create or join a room.
+
+#### Linux (x64)
+
+1. _(Host machine only)_ Allow TCP `4000` & UDP `45454` in your firewall, then start the server:
+   ```bash
+   chmod +x ./whiteboard-server-linux-x64
+   ./whiteboard-server-linux-x64 --port 4000 --data-dir ./data
+   ```
+2. Make the AppImage executable and run it:
+   ```bash
+   chmod +x ./LAN-Whiteboard-1.0.1-linux-x64.AppImage
+   ./LAN-Whiteboard-1.0.1-linux-x64.AppImage
+   ```
+   If FUSE (`libfuse2`) is missing (Ubuntu 22.04+/24.04+), add `--appimage-extract-and-run` (and `--no-sandbox` if user namespaces are restricted).
+3. Pick the discovered server (or enter the host LAN IP & port `4000`) and create or join a room.
+
+See [`docs/packaging.md`](docs/packaging.md) for checksum verification, local packaging commands (`npm run package:server && npm run package:client`), and troubleshooting.
 
 ---
 

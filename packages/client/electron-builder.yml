@@ -11,6 +11,7 @@ files:
   - dist-electron/**
   - package.json
 asar: true
+afterPack: ../../scripts/mac-adhoc-sign.mjs
 
 win:
   target:

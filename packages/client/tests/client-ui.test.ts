@@ -19,6 +19,7 @@ import {
   useWhiteboardStore,
 } from '../src/store/useWhiteboardStore.js';
 import { PropertyBarContent } from '../src/components/layout/PropertyBar.js';
+import { computeResizedObjectChanges, pickHandle } from '../src/components/canvas/shapes.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 import { shouldDismissOnOutsideEvent } from '../src/hooks/useClickOutside.js';
 import type { ElectronWhiteboardAPI } from '../src/types/ipc.js';
@@ -1592,6 +1593,53 @@ describe('Client UI & Store Suite', () => {
       expect(shouldDismissOnOutsideEvent(container, container)).toBe(false);
       expect(shouldDismissOnOutsideEvent(container, insideNode)).toBe(false);
       expect(shouldDismissOnOutsideEvent(container, outsideNode)).toBe(true);
+    });
+
+    it('computes resize changes for images and updates bound connectors', () => {
+      const imageId = generateUuid();
+      const connectorId = generateUuid();
+      const imageObj: WhiteboardObject = {
+        id: imageId,
+        type: 'image',
+        assetId: generateUuid(),
+        mime: 'image/png',
+        naturalWidth: 400,
+        naturalHeight: 300,
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 150,
+        authorId: 'u1',
+        seq: 1,
+        zIndex: 1,
+        updatedAt: Date.now(),
+      };
+      const connectorObj: WhiteboardObject = {
+        id: connectorId,
+        type: 'shape',
+        shapeType: 'connector',
+        x: 300,
+        y: 175,
+        width: 120,
+        height: 0,
+        strokeColor: '#000000',
+        strokeWidth: 2,
+        startAnchor: { objectId: imageId, side: 'right' },
+        authorId: 'u1',
+        seq: 2,
+        zIndex: 2,
+        updatedAt: Date.now(),
+      };
+      const allObjects: Record<string, WhiteboardObject> = {
+        [imageId]: imageObj,
+        [connectorId]: connectorObj,
+      };
+
+      expect(pickHandle(imageObj, 300, 250, 1)).toBe('se');
+      const updates = computeResizedObjectChanges(imageObj, 'se', 360, 290, allObjects);
+      expect(updates[imageId]).toEqual({ x: 100, y: 100, width: 260, height: 190 });
+      // Bound connector right-side anchor moves to new right edge (360, 100 + 190/2 = 195)
+      expect(updates[connectorId]).toEqual({ x: 360, y: 195, width: 60, height: -20 });
     });
   });
 });

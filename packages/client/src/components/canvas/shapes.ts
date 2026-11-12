@@ -7,13 +7,14 @@
  * width/height may be negative, which encodes the drag direction without extra fields.
  */
 
-import type {
-  AnchorSide,
-  ImageObject,
-  ObjectChanges,
-  ShapeObject,
-  StrokeObject,
-  WhiteboardObject,
+import {
+  applyObjectChanges,
+  type AnchorSide,
+  type ImageObject,
+  type ObjectChanges,
+  type ShapeObject,
+  type StrokeObject,
+  type WhiteboardObject,
 } from '@cn-whiteboard/common';
 
 export interface Bounds {
@@ -431,6 +432,34 @@ export function recomputeBoundConnector(
     width: endX - startX,
     height: endY - startY,
   };
+}
+
+/** Computes resize changes for a resizable box object (shape or image) plus bound connectors. */
+export function computeResizedObjectChanges(
+  obj: ShapeObject | ImageObject,
+  handle: HandleId,
+  px: number,
+  py: number,
+  objects: Record<string, WhiteboardObject>,
+): Record<string, ObjectChanges> {
+  const boxChanges = resizeChanges(obj, handle, px, py);
+  const changesById: Record<string, ObjectChanges> = { [obj.id]: boxChanges };
+  const merged: Record<string, WhiteboardObject> = {
+    ...objects,
+    [obj.id]: applyObjectChanges(obj, boxChanges, obj.seq, obj.updatedAt),
+  };
+
+  for (const candidate of Object.values(objects)) {
+    if (
+      candidate.type === 'shape' &&
+      candidate.shapeType === 'connector' &&
+      (candidate.startAnchor?.objectId === obj.id || candidate.endAnchor?.objectId === obj.id)
+    ) {
+      const ch = recomputeBoundConnector(candidate, merged);
+      if (ch) changesById[candidate.id] = ch;
+    }
+  }
+  return changesById;
 }
 
 /** Changes that apply a chosen color to the right property of each object kind. */

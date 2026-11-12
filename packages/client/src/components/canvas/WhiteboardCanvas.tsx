@@ -31,6 +31,7 @@ import {
   type AnchorPoint,
   type Bounds,
   type HandleId,
+  computeResizedObjectChanges,
   defaultShapeAlign,
   findNearestAnchor,
   fontOf,
@@ -47,7 +48,6 @@ import {
   recomputeBoundConnector,
   renderSelection,
   renderShape,
-  resizeChanges,
   shapeTextColor,
   stickyFill,
 } from './shapes.js';
@@ -834,33 +834,6 @@ export const WhiteboardCanvas: React.FC = () => {
     return changesById;
   };
 
-  /** Computes resize changes for a shape plus any attached bound connectors. */
-  const computeResizedObjects = (
-    obj: ShapeObject,
-    handle: HandleId,
-    px: number,
-    py: number,
-  ): Record<string, ObjectChanges> => {
-    const boxChanges = resizeChanges(obj, handle, px, py);
-    const changesById: Record<string, ObjectChanges> = { [obj.id]: boxChanges };
-    const merged: Record<string, WhiteboardObject> = {
-      ...objects,
-      [obj.id]: applyObjectChanges(obj, boxChanges, obj.seq, obj.updatedAt),
-    };
-
-    for (const candidate of Object.values(objects)) {
-      if (
-        candidate.type === 'shape' &&
-        candidate.shapeType === 'connector' &&
-        (candidate.startAnchor?.objectId === obj.id || candidate.endAnchor?.objectId === obj.id)
-      ) {
-        const ch = recomputeBoundConnector(candidate, merged);
-        if (ch) changesById[candidate.id] = ch;
-      }
-    }
-    return changesById;
-  };
-
   /** Finishes a create-drag: text/sticky open the editor, other shapes are sent immediately. */
   const finishCreate = (drag: Extract<DragState, { kind: 'create' }>, x: number, y: number) => {
     setDraft(null);
@@ -1341,8 +1314,8 @@ export const WhiteboardCanvas: React.FC = () => {
         setPreview(next);
       } else {
         const o = objects[drag.id];
-        if (o && o.type === 'shape') {
-          const updates = computeResizedObjects(o, drag.handle, x, y);
+        if (o && (o.type === 'shape' || o.type === 'image')) {
+          const updates = computeResizedObjectChanges(o, drag.handle, x, y, objects);
           const next: Record<string, WhiteboardObject> = {};
           for (const [id, ch] of Object.entries(updates)) {
             const existing = objects[id];
@@ -1510,8 +1483,8 @@ export const WhiteboardCanvas: React.FC = () => {
         }
       } else {
         const o = objects[drag.id];
-        if (o && o.type === 'shape') {
-          const updates = computeResizedObjects(o, drag.handle, x, y);
+        if (o && (o.type === 'shape' || o.type === 'image')) {
+          const updates = computeResizedObjectChanges(o, drag.handle, x, y, objects);
           const ids = Object.keys(updates);
           if (ids.length > 0) {
             updateObjects(ids, (item) => updates[item.id]!);

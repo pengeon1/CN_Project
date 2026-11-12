@@ -31,6 +31,7 @@ import {
   type PermissionChangePayload,
   type Point,
   type RemoteCursor,
+  type RemovedParticipant,
   type ResyncResponsePayload,
   Role,
   type RoomSnapshot,
@@ -128,6 +129,7 @@ export interface WhiteboardState {
     locked: boolean;
     allowNameChanges?: boolean;
     defaultViewer?: boolean;
+    removedParticipants?: RemovedParticipant[];
     createdAt?: number;
     password?: string;
   } | null;
@@ -1505,6 +1507,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
             locked: payload.locked,
             allowNameChanges: payload.allowNameChanges ?? false,
             defaultViewer: payload.defaultViewer ?? false,
+            removedParticipants: payload.removedParticipants ?? [],
             createdAt: payload.createdAt,
             password: get().roomPassword,
           },
@@ -1782,7 +1785,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       case MessageType.PERMISSION_CHANGE: {
         const payload = envelope.payload as PermissionChangePayload;
         const { currentUser } = get();
-        if (payload.kick && payload.targetUserId === currentUser?.id) {
+        if ((payload.kick || payload.ban) && payload.targetUserId === currentUser?.id) {
           const api = getElectronAPI();
           if (api) {
             void api.disconnect().catch((error: unknown) => {
@@ -1794,10 +1797,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
           }
           set({
             accessNotice: {
-              title: 'Removed from the room',
+              title: payload.ban ? 'Permanently banned from the room' : 'Removed from the room',
               message: payload.reason
-                ? `The host removed you from this room: ${payload.reason}`
-                : 'The host removed you from this room.',
+                ? `The host ${payload.ban ? 'permanently banned' : 'removed'} you from this room: ${payload.reason}`
+                : `The host ${payload.ban ? 'permanently banned' : 'removed'} you from this room.`,
             },
             connectionStatus: 'disconnected',
             roomPassword: undefined,
@@ -1865,6 +1868,10 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
                     payload.defaultViewer !== undefined
                       ? payload.defaultViewer
                       : state.roomInfo.defaultViewer,
+                  removedParticipants:
+                    payload.removedParticipants !== undefined
+                      ? payload.removedParticipants
+                      : state.roomInfo.removedParticipants,
                 }
               : null,
             profileSettingsOpen:

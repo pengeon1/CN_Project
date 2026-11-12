@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { MAX_VERSION_NAME_LENGTH, ROOM_CODE_LENGTH } from '../constants.js';
 import { MessageTypeSchema } from './envelope.schema.js';
-import { ParticipantSchema } from './room.schema.js';
+import { ParticipantSchema, RemovedParticipantSchema } from './room.schema.js';
 import { ChatMessageSchema } from './chat.schema.js';
 import { WhiteboardObjectSchema } from './drawing.schema.js';
 
@@ -54,6 +54,7 @@ export const RoomSnapshotSchema = z.object({
   seq: z.number().int().nonnegative(),
   objects: z.record(WhiteboardObjectSchema),
   participants: z.array(ParticipantSchema),
+  removedParticipants: z.array(RemovedParticipantSchema).optional().default([]),
   chatHistory: z.array(ChatMessageSchema),
   locked: z.boolean(),
   allowNameChanges: z.boolean().optional().default(false),

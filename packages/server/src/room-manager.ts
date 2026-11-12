@@ -205,7 +205,11 @@ export class RoomManager {
       }
 
       const token = sessionToken ?? session.sessionId;
-      if (room.wasKicked(token)) {
+      const access = room.checkJoinAccess(token, session.remoteIp, username);
+      if (access === 'banned') {
+        throw new Error('You have been permanently banned from this room');
+      }
+      if (access === 'kicked') {
         throw new Error('You have been removed from this room');
       }
       const resumed = room.canResume(token);

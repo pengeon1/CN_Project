@@ -8,6 +8,7 @@ import type {
   ChatMessage,
   Participant,
   Point,
+  RemovedParticipant,
   RoomSnapshot,
   ImageObject,
   PresentationState,
@@ -199,6 +200,9 @@ export interface PermissionChangePayload {
   allowNameChanges?: boolean;
   defaultViewer?: boolean;
   kick?: boolean;
+  ban?: boolean;
+  allowRejoin?: boolean;
+  removedParticipants?: RemovedParticipant[];
   reason?: string;
 }
 

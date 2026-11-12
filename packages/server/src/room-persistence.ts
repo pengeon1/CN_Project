@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   ChatMessageSchema,
+  RemovedParticipantSchema,
   SequencedOperationSchema,
   WhiteboardObjectSchema,
 } from '@cn-whiteboard/common';
@@ -58,6 +59,16 @@ const PersistedRoomSchema = z.object({
       z.object({
         mime: z.enum(['image/png', 'image/jpeg', 'image/webp']),
         data: z.string(),
+      }),
+    )
+    .optional(),
+  moderationRecords: z
+    .array(
+      z.object({
+        info: RemovedParticipantSchema,
+        tokens: z.array(z.string()),
+        ips: z.array(z.string()),
+        usernames: z.array(z.string()),
       }),
     )
     .optional(),

@@ -5,25 +5,56 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Pencil, Send, Shield, Users, X } from 'lucide-react';
-import { Role } from '@cn-whiteboard/common';
-import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import {
+  type Participant,
+  type PermissionChangePayload,
+  type RemovedParticipant,
+  Role,
+} from '@cn-whiteboard/common';
+import { type ChatEntry, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+
+export interface RightPanelProps {
+  rightPanelOpen: boolean;
+  rightPanelTab: 'chat' | 'participants';
+  chatMessages: ChatEntry[];
+  unreadChatCount: number;
+  participants: Participant[];
+  currentUser: { id: string; username: string; color: string; role: Role } | null;
+  roomInfo: {
+    code: string;
+    name: string;
+    isHost: boolean;
+    locked: boolean;
+    allowNameChanges?: boolean;
+    defaultViewer?: boolean;
+    removedParticipants?: RemovedParticipant[];
+  } | null;
+  sendPermissionChange: (payload: PermissionChangePayload) => void;
+  setProfileSettingsOpen: (open: boolean) => void;
+  setRightPanelOpen: (open: boolean) => void;
+  setRightPanelTab: (tab: 'chat' | 'participants') => void;
+  sendChatMessage: (text: string) => void;
+}
 
 export const RightPanel: React.FC = () => {
-  const {
-    rightPanelOpen,
-    rightPanelTab,
-    chatMessages,
-    unreadChatCount,
-    participants,
-    currentUser,
-    roomInfo,
-    sendPermissionChange,
-    setProfileSettingsOpen,
-    setRightPanelOpen,
-    setRightPanelTab,
-    sendChatMessage,
-  } = useWhiteboardStore();
+  const state = useWhiteboardStore();
+  return <RightPanelContent {...state} />;
+};
 
+export const RightPanelContent: React.FC<RightPanelProps> = ({
+  rightPanelOpen,
+  rightPanelTab,
+  chatMessages,
+  unreadChatCount,
+  participants,
+  currentUser,
+  roomInfo,
+  sendPermissionChange,
+  setProfileSettingsOpen,
+  setRightPanelOpen,
+  setRightPanelTab,
+  sendChatMessage,
+}) => {
   const [inputDraft, setInputDraft] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -264,10 +295,30 @@ export const RightPanel: React.FC = () => {
                             });
                           }
                         }}
-                        title={`Remove ${p.username} from the room`}
-                        className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-rose-400 hover:bg-rose-500/10"
+                        title={`Remove ${p.username} from the room (can be re-admitted)`}
+                        className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-amber-400 hover:bg-amber-500/10"
                       >
                         Kick
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Permanently ban ${p.username} from this room? They will not be able to rejoin.`,
+                            )
+                          ) {
+                            sendPermissionChange({
+                              targetUserId: p.id,
+                              ban: true,
+                              reason: 'Permanently banned by host',
+                            });
+                          }
+                        }}
+                        title={`Permanently ban ${p.username} from the room`}
+                        className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-rose-400 hover:bg-rose-500/10"
+                      >
+                        Ban
                       </button>
                     </div>
                   )}
@@ -275,6 +326,73 @@ export const RightPanel: React.FC = () => {
               </div>
             );
           })}
+
+          {currentUser?.role === Role.HOST && (roomInfo?.removedParticipants?.length ?? 0) > 0 && (
+            <div className="pt-3 mt-3 border-t border-slate-800/80 space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Removed &amp; Banned ({roomInfo?.removedParticipants?.length ?? 0})
+              </div>
+              {roomInfo?.removedParticipants?.map((entry) => (
+                <div
+                  key={entry.userId}
+                  className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-950/60 p-2.5"
+                >
+                  <div className="flex items-center gap-2">
+                    <div
+                      style={{ backgroundColor: entry.color }}
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold text-white opacity-75"
+                    >
+                      {entry.username.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-slate-200">{entry.username}</div>
+                      <div
+                        className={`text-[10px] ${
+                          entry.banned ? 'text-rose-400 font-semibold' : 'text-amber-400'
+                        }`}
+                      >
+                        {entry.banned ? 'Banned permanently' : 'Kicked'}
+                      </div>
+                    </div>
+                  </div>
+                  {!entry.banned && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          sendPermissionChange({ targetUserId: entry.userId, allowRejoin: true })
+                        }
+                        title={`Allow ${entry.username} back into the room`}
+                        className="rounded-md bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-500/25"
+                      >
+                        Allow back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Permanently ban ${entry.username} from this room? They will not be able to rejoin.`,
+                            )
+                          ) {
+                            sendPermissionChange({
+                              targetUserId: entry.userId,
+                              ban: true,
+                              reason: 'Permanently banned by host',
+                            });
+                          }
+                        }}
+                        title={`Permanently ban ${entry.username} from the room`}
+                        className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-rose-400 hover:bg-rose-500/10"
+                      >
+                        Ban
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </aside>

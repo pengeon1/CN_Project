@@ -435,4 +435,102 @@ describe('Security and room roles', () => {
     ).payload as RoomStatePayload;
     expect(editorState.participants.find((p) => p.id === coEditor.userId)?.role).toBe(Role.EDITOR);
   });
+
+  it('allows host to re-admit mistakenly kicked participants and permanently ban users', async () => {
+    const host = await connect('Host');
+    host.send(MessageType.CREATE_ROOM, { roomName: 'Moderation Room', username: 'Host' });
+    const state = (
+      await host.waitFor((message) => message.type === MessageType.ROOM_STATE, 'room state')
+    ).payload as RoomStatePayload;
+    const roomCode = state.roomCode;
+    const room = server.roomManager.getRoom(roomCode)!;
+
+    const accidental = await connect('AccidentalGuest');
+    accidental.send(MessageType.JOIN_ROOM, { roomCode, username: 'AccidentalGuest' });
+    await accidental.waitFor(
+      (message) => message.type === MessageType.ROOM_STATE,
+      'guest room state',
+    );
+    const accidentalId = accidental.userId;
+    const accidentalSessionId = accidental.sessionId;
+
+    // Host kicks by mistake
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { targetUserId: accidentalId, kick: true, reason: 'Clicked wrong user' },
+      { room: roomCode, user_id: host.userId },
+    );
+    await host.waitFor(
+      (message) => message.type === MessageType.PERMISSION_CHANGE,
+      'kick broadcast',
+    );
+    await host.waitFor((message) => message.type === MessageType.PARTICIPANT_LEFT, 'kick left');
+    expect(room.getRemovedParticipants()).toHaveLength(1);
+    expect(room.getRemovedParticipants()[0]?.banned).toBe(false);
+
+    // Blocked while kicked
+    const retryWhileKicked = await connect('AccidentalGuest', accidentalSessionId);
+    retryWhileKicked.send(
+      MessageType.JOIN_ROOM,
+      { roomCode, username: 'AccidentalGuest', sessionToken: accidentalSessionId },
+      { room: roomCode, user_id: retryWhileKicked.userId },
+    );
+    await retryWhileKicked.waitForError('JOIN_FAILED');
+
+    // Host allows back
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { targetUserId: accidentalId, allowRejoin: true },
+      { room: roomCode, user_id: host.userId },
+    );
+    const allowEvent = await host.waitFor(
+      (message) => message.type === MessageType.PERMISSION_CHANGE,
+      'allowRejoin broadcast',
+    );
+    expect((allowEvent.payload as { removedParticipants?: unknown[] }).removedParticipants).toEqual(
+      [],
+    );
+
+    const rejoined = await connect('AccidentalGuest', accidentalSessionId);
+    rejoined.send(MessageType.JOIN_ROOM, {
+      roomCode,
+      username: 'AccidentalGuest',
+      sessionToken: accidentalSessionId,
+    });
+    await rejoined.waitFor(
+      (message) => message.type === MessageType.ROOM_STATE,
+      're-admitted ROOM_STATE',
+    );
+    expect(room.participantCount).toBe(2);
+
+    // Host permanently bans the participant
+    const reAdmittedId = rejoined.userId;
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { targetUserId: reAdmittedId, ban: true, reason: 'Permanent ban test' },
+      { room: roomCode, user_id: host.userId },
+    );
+    const banEvent = await host.waitFor(
+      (message) => message.type === MessageType.PERMISSION_CHANGE,
+      'ban broadcast',
+    );
+    await host.waitFor((message) => message.type === MessageType.PARTICIPANT_LEFT, 'ban left');
+    expect(
+      (banEvent.payload as { removedParticipants?: Array<{ banned: boolean }> })
+        .removedParticipants?.[0]?.banned,
+    ).toBe(true);
+
+    // Permanently banned user cannot be allowed back and cannot rejoin even on a fresh session
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { targetUserId: reAdmittedId, allowRejoin: true },
+      { room: roomCode, user_id: host.userId },
+    );
+    await host.waitForError('INVALID_PERMISSION_CHANGE');
+
+    const bannedReconnect = await connect('AccidentalGuest');
+    bannedReconnect.send(MessageType.JOIN_ROOM, { roomCode, username: 'AccidentalGuest' });
+    const banError = await bannedReconnect.waitForError('JOIN_FAILED');
+    expect((banError.payload as { message: string }).message).toContain('permanently banned');
+  });
 });

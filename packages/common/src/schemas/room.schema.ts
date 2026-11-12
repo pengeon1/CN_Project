@@ -16,6 +16,14 @@ export const ParticipantSchema = z.object({
   joinedAt: z.number().int().positive(),
 });
 
+export const RemovedParticipantSchema = z.object({
+  userId: z.string().uuid(),
+  username: z.string().min(MIN_USERNAME_LENGTH).max(MAX_USERNAME_LENGTH),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a 6-digit hex color'),
+  removedAt: z.number().int().positive(),
+  banned: z.boolean(),
+});
+
 export const CreateRoomPayloadSchema = z.object({
   roomName: z.string().min(1).max(64),
   username: z.string().min(MIN_USERNAME_LENGTH).max(MAX_USERNAME_LENGTH),
@@ -67,12 +75,19 @@ export const PermissionChangePayloadSchema = z
     allowNameChanges: z.boolean().optional(),
     defaultViewer: z.boolean().optional(),
     kick: z.boolean().optional(),
+    ban: z.boolean().optional(),
+    allowRejoin: z.boolean().optional(),
+    removedParticipants: z.array(RemovedParticipantSchema).optional(),
     reason: z.string().max(256).optional(),
   })
   .superRefine((payload, context) => {
-    const changesParticipant =
-      payload.targetUserId !== undefined &&
-      (payload.newRole !== undefined || payload.kick === true);
+    const participantActions = [
+      payload.newRole !== undefined,
+      payload.kick === true,
+      payload.ban === true,
+      payload.allowRejoin === true,
+    ].filter(Boolean).length;
+    const changesParticipant = payload.targetUserId !== undefined && participantActions > 0;
     const changesRoomSetting =
       payload.lockRoom !== undefined ||
       payload.allowNameChanges !== undefined ||
@@ -80,13 +95,13 @@ export const PermissionChangePayloadSchema = z
     if (!changesParticipant && !changesRoomSetting) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'A role change, kick, or room setting change is required',
+        message: 'A role change, moderation action, or room setting change is required',
       });
     }
-    if (payload.kick && payload.newRole !== undefined) {
+    if (participantActions > 1) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'A participant cannot be kicked and role-changed in the same request',
+        message: 'Only one participant moderation or role action is allowed per request',
       });
     }
     if (changesParticipant && changesRoomSetting) {
@@ -95,10 +110,10 @@ export const PermissionChangePayloadSchema = z
         message: 'Participant changes and room setting changes must be separate requests',
       });
     }
-    if (payload.reason !== undefined && payload.kick !== true) {
+    if (payload.reason !== undefined && payload.kick !== true && payload.ban !== true) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'A reason is only valid when kicking a participant',
+        message: 'A reason is only valid when kicking or banning a participant',
       });
     }
   });

@@ -571,17 +571,7 @@ export class WhiteboardServer {
             }
           } else if (payload.targetUserId) {
             const target = room.getParticipant(payload.targetUserId);
-            if (!target) {
-              this.sendError(
-                session,
-                'INVALID_PERMISSION_CHANGE',
-                'Participant is no longer in the room',
-                envelope,
-                room.code,
-              );
-              return;
-            }
-            if (payload.targetUserId === session.userId || target.role === Role.HOST) {
+            if (payload.targetUserId === session.userId || target?.role === Role.HOST) {
               this.sendError(
                 session,
                 'INVALID_PERMISSION_CHANGE',
@@ -592,27 +582,53 @@ export class WhiteboardServer {
               return;
             }
 
-            if (payload.kick) {
-              const reason = payload.reason ?? 'Removed by host';
+            const emitPermissionEvent = (eventPayload: PermissionChangePayload) => {
               const permissionEvent = room.recordEvent(
                 MessageType.PERMISSION_CHANGE,
-                { ...payload, reason },
+                eventPayload,
                 session.userId,
               );
               room.broadcast(
-                createEnvelope(
-                  MessageType.PERMISSION_CHANGE,
-                  { ...payload, reason },
-                  {
-                    msg_id: envelope.msg_id,
-                    seq: permissionEvent.seq,
-                    room: room.code,
-                    user_id: session.userId,
-                    ts: permissionEvent.ts,
-                  },
-                ),
+                createEnvelope(MessageType.PERMISSION_CHANGE, eventPayload, {
+                  msg_id: envelope.msg_id,
+                  seq: permissionEvent.seq,
+                  room: room.code,
+                  user_id: session.userId,
+                  ts: permissionEvent.ts,
+                }),
               );
-              if (!room.kickParticipant(payload.targetUserId, reason)) {
+            };
+
+            if (payload.allowRejoin) {
+              if (!room.allowRejoinParticipant(payload.targetUserId)) {
+                this.sendError(
+                  session,
+                  'INVALID_PERMISSION_CHANGE',
+                  'Only temporarily kicked participants can be re-admitted',
+                  envelope,
+                  room.code,
+                );
+                return;
+              }
+              emitPermissionEvent({
+                ...payload,
+                removedParticipants: room.getRemovedParticipants(),
+              });
+              return;
+            }
+
+            if (payload.kick || payload.ban) {
+              const reason =
+                payload.reason ?? (payload.ban ? 'Permanently banned by host' : 'Removed by host');
+              let broadcastDone = false;
+              const result = room.moderateParticipant(payload.targetUserId, reason, {
+                banned: Boolean(payload.ban),
+                onBeforeDisconnect: (removedParticipants) => {
+                  broadcastDone = true;
+                  emitPermissionEvent({ ...payload, reason, removedParticipants });
+                },
+              });
+              if (!result) {
                 this.sendError(
                   session,
                   'INVALID_PERMISSION_CHANGE',
@@ -620,7 +636,26 @@ export class WhiteboardServer {
                   envelope,
                   room.code,
                 );
+                return;
               }
+              if (!broadcastDone) {
+                emitPermissionEvent({
+                  ...payload,
+                  reason,
+                  removedParticipants: room.getRemovedParticipants(),
+                });
+              }
+              return;
+            }
+
+            if (!target) {
+              this.sendError(
+                session,
+                'INVALID_PERMISSION_CHANGE',
+                'Participant is no longer in the room',
+                envelope,
+                room.code,
+              );
               return;
             }
 

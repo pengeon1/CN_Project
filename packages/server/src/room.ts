@@ -23,6 +23,7 @@ import {
   type Participant,
   PARTICIPANT_COLORS,
   type Point,
+  type RemovedParticipant,
   type ResyncResponsePayload,
   Role,
   type RoomSnapshot,
@@ -78,6 +79,24 @@ export interface PersistedRoomState {
   assets?: Record<string, StoredAsset>;
   /** Saved board versions (full object maps), newest last. */
   versions?: StoredVersion[];
+  /** Kicked / banned participant records persisted so bans survive restart. */
+  moderationRecords?: Array<{
+    info: RemovedParticipant;
+    tokens: string[];
+    ips: string[];
+    usernames: string[];
+  }>;
+}
+
+interface ModerationRecord {
+  info: RemovedParticipant;
+  tokens: Set<string>;
+  ips: Set<string>;
+  usernames: Set<string>;
+}
+
+function isLoopbackIp(ip: string): boolean {
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
 /** A saved copy of the board that the host can restore. */
@@ -163,7 +182,7 @@ export class Room {
   private participants: Map<string, RoomParticipantEntry> = new Map();
   private disconnectedParticipants: Map<string, Participant> = new Map();
   private sessionTokenToUserId: Map<string, string> = new Map();
-  private kickedSessionTokens = new Set<string>();
+  private moderationRecords: Map<string, ModerationRecord> = new Map();
   private objects: Map<string, WhiteboardObject> = new Map();
   /**
    * op_id -> the seq the operation was assigned. Insertion-ordered so the oldest entry can be
@@ -473,6 +492,12 @@ export class Room {
       ),
       assets: Object.fromEntries(this.assets),
       versions: this.cloneSnapshot(this.versions),
+      moderationRecords: Array.from(this.moderationRecords.values()).map((record) => ({
+        info: { ...record.info },
+        tokens: Array.from(record.tokens),
+        ips: Array.from(record.ips),
+        usernames: Array.from(record.usernames),
+      })),
     };
   }
 
@@ -508,6 +533,17 @@ export class Room {
     this.baseSeq = options.preserveSequence ? this.seq + 1 : state.baseSeq;
     this.objects = new Map(
       Object.entries(state.objects).map(([id, object]) => [id, this.cloneSnapshot(object)]),
+    );
+    this.moderationRecords = new Map(
+      (state.moderationRecords ?? []).map((record) => [
+        record.info.userId,
+        {
+          info: { ...record.info },
+          tokens: new Set(record.tokens),
+          ips: new Set(record.ips),
+          usernames: new Set(record.usernames),
+        },
+      ]),
     );
     this.operationsLog = options.preserveSequence ? [] : this.cloneSnapshot(state.operations);
     this.chatHistory = this.cloneSnapshot(state.chatHistory);
@@ -1278,8 +1314,34 @@ export class Room {
     return this.disconnectedParticipants.has(userId) || this.participants.has(userId);
   }
 
+  public checkJoinAccess(
+    sessionToken: string | undefined,
+    remoteIp: string,
+    username: string,
+  ): 'banned' | 'kicked' | null {
+    const normalizedName = username.trim().toLowerCase();
+    for (const record of this.moderationRecords.values()) {
+      if (record.info.banned) {
+        if (
+          (sessionToken && record.tokens.has(sessionToken)) ||
+          (!isLoopbackIp(remoteIp) && record.ips.has(remoteIp)) ||
+          (normalizedName.length > 0 && record.usernames.has(normalizedName))
+        ) {
+          return 'banned';
+        }
+      } else if (sessionToken && record.tokens.has(sessionToken)) {
+        return 'kicked';
+      }
+    }
+    return null;
+  }
+
   public wasKicked(sessionToken: string | undefined): boolean {
-    return sessionToken !== undefined && this.kickedSessionTokens.has(sessionToken);
+    if (!sessionToken) return false;
+    for (const record of this.moderationRecords.values()) {
+      if (record.tokens.has(sessionToken)) return true;
+    }
+    return false;
   }
 
   /**
@@ -1490,24 +1552,84 @@ export class Room {
     return entry.participant;
   }
 
-  public kickParticipant(userId: string, reason: string): Participant | null {
+  public getRemovedParticipants(): RemovedParticipant[] {
+    return Array.from(this.moderationRecords.values())
+      .map((record) => ({ ...record.info }))
+      .sort((a, b) => b.removedAt - a.removedAt);
+  }
+
+  public moderateParticipant(
+    userId: string,
+    reason: string,
+    options: { banned: boolean; onBeforeDisconnect?: (removed: RemovedParticipant[]) => void },
+  ): { participant: RemovedParticipant; wasActive: boolean } | null {
+    if (userId === this.hostUserId) return null;
     const entry = this.participants.get(userId);
-    if (!entry || userId === this.hostUserId) return null;
+    if (!entry) {
+      if (!options.banned) return null;
+      const existing = this.moderationRecords.get(userId);
+      if (!existing) return null;
+      existing.info.banned = true;
+      existing.info.removedAt = Date.now();
+      this.notifyChanged();
+      return { participant: { ...existing.info }, wasActive: false };
+    }
+
+    const existing = this.moderationRecords.get(userId);
+    const tokens = existing?.tokens ?? new Set<string>();
+    const ips = existing?.ips ?? new Set<string>();
+    const usernames = existing?.usernames ?? new Set<string>();
 
     for (const [token, mappedUserId] of this.sessionTokenToUserId) {
       if (mappedUserId === userId) {
         this.sessionTokenToUserId.delete(token);
-        this.kickedSessionTokens.add(token);
+        tokens.add(token);
       }
     }
-    this.kickedSessionTokens.add(entry.session.sessionId);
+    tokens.add(entry.session.sessionId);
+    if (entry.session.remoteIp && !isLoopbackIp(entry.session.remoteIp)) {
+      ips.add(entry.session.remoteIp);
+    }
+    const normalizedName = entry.participant.username.trim().toLowerCase();
+    if (normalizedName) {
+      usernames.add(normalizedName);
+    }
+
+    const info: RemovedParticipant = {
+      userId,
+      username: entry.participant.username,
+      color: entry.participant.color,
+      removedAt: Date.now(),
+      banned: options.banned,
+    };
+    this.moderationRecords.set(userId, { info, tokens, ips, usernames });
+    this.notifyChanged();
+
+    // Notify room (including target socket before destroy) with updated moderation list.
+    options.onBeforeDisconnect?.(this.getRemovedParticipants());
 
     const participant = this.removeParticipant(userId, reason, entry.session);
     if (participant) {
       this.disconnectedParticipants.delete(userId);
       entry.session.destroy(reason);
     }
-    return participant;
+    return { participant: info, wasActive: true };
+  }
+
+  public kickParticipant(userId: string, reason: string): Participant | null {
+    const entry = this.participants.get(userId);
+    if (!entry || userId === this.hostUserId) return null;
+    const snapshot = { ...entry.participant };
+    const result = this.moderateParticipant(userId, reason, { banned: false });
+    return result ? snapshot : null;
+  }
+
+  public allowRejoinParticipant(userId: string): boolean {
+    const record = this.moderationRecords.get(userId);
+    if (!record || record.info.banned) return false;
+    this.moderationRecords.delete(userId);
+    this.notifyChanged();
+    return true;
   }
 
   /**
@@ -1612,6 +1734,7 @@ export class Room {
       seq: this.seq,
       objects: objectsRecord,
       participants: this.getParticipants(),
+      removedParticipants: this.getRemovedParticipants(),
       chatHistory: this.getChatHistory(),
       locked: this.locked,
       allowNameChanges: this.allowNameChanges,

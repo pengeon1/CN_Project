@@ -194,6 +194,14 @@ export interface VersionMeta {
   objectCount: number;
 }
 
+export interface RemovedParticipant {
+  userId: string;
+  username: string;
+  color: string;
+  removedAt: number;
+  banned: boolean;
+}
+
 /**
  * Fully materialized room snapshot sent during late-join sync or room state export.
  */
@@ -203,6 +211,7 @@ export interface RoomSnapshot {
   seq: number;
   objects: Record<string, WhiteboardObject>;
   participants: Participant[];
+  removedParticipants?: RemovedParticipant[];
   chatHistory: ChatMessage[];
   locked: boolean;
   allowNameChanges?: boolean;

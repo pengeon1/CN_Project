@@ -20,6 +20,7 @@ import {
 } from '../src/store/useWhiteboardStore.js';
 import { PropertyBarContent } from '../src/components/layout/PropertyBar.js';
 import { LeftToolbarContent } from '../src/components/layout/LeftToolbar.js';
+import { RightPanelContent } from '../src/components/layout/RightPanel.js';
 import { ConnectDialog } from '../src/components/dialogs/ConnectDialog.js';
 import { computeResizedObjectChanges, pickHandle } from '../src/components/canvas/shapes.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
@@ -1799,6 +1800,78 @@ describe('Client UI & Store Suite', () => {
           ),
         );
       expect(useWhiteboardStore.getState().roomInfo?.defaultViewer).toBe(true);
+    });
+
+    it('renders kick, allow-back, and permanent ban controls and handles ban notices', () => {
+      const hostId = generateUuid();
+      const kickedId = generateUuid();
+      const bannedId = generateUuid();
+      const activeId = generateUuid();
+      useWhiteboardStore.setState({
+        rightPanelOpen: true,
+        rightPanelTab: 'participants',
+        currentUser: { id: hostId, username: 'Host', color: '#000000', role: Role.HOST },
+        participants: [
+          { id: hostId, username: 'Host', role: Role.HOST, color: '#000000', joinedAt: 1 },
+          {
+            id: activeId,
+            username: 'ActiveUser',
+            role: Role.EDITOR,
+            color: '#10B981',
+            joinedAt: 2,
+          },
+        ],
+        roomInfo: {
+          code: 'MOD123',
+          name: 'Moderation Room',
+          isHost: true,
+          locked: false,
+          removedParticipants: [
+            {
+              userId: kickedId,
+              username: 'OopsKicked',
+              color: '#F59E0B',
+              removedAt: 100,
+              banned: false,
+            },
+            {
+              userId: bannedId,
+              username: 'PermBanned',
+              color: '#EF4444',
+              removedAt: 200,
+              banned: true,
+            },
+          ],
+        },
+      });
+
+      const panelHtml = renderToStaticMarkup(
+        React.createElement(RightPanelContent, useWhiteboardStore.getState()),
+      );
+      expect(panelHtml).toContain('Kick');
+      expect(panelHtml).toContain('Ban');
+      expect(panelHtml).toContain('OopsKicked');
+      expect(panelHtml).toContain('Allow back');
+      expect(panelHtml).toContain('PermBanned');
+      expect(panelHtml).toContain('Banned permanently');
+
+      // Receiving a PERMISSION_CHANGE ban targeting the local user clears session with permanent ban notice
+      useWhiteboardStore.setState({
+        currentUser: { id: bannedId, username: 'PermBanned', color: '#EF4444', role: Role.EDITOR },
+      });
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { targetUserId: bannedId, ban: true, reason: 'Disruptive behavior' },
+            { room: 'MOD123', user_id: hostId, seq: 10 },
+          ),
+        );
+      expect(useWhiteboardStore.getState().accessNotice?.title).toBe(
+        'Permanently banned from the room',
+      );
+      expect(useWhiteboardStore.getState().roomInfo).toBeNull();
     });
   });
 });

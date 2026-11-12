@@ -533,4 +533,108 @@ describe('Security and room roles', () => {
     const banError = await bannedReconnect.waitForError('JOIN_FAILED');
     expect((banError.payload as { message: string }).message).toContain('permanently banned');
   });
+
+  it('allows the host to bulk update roles with setAllRole to VIEWER or EDITOR', async () => {
+    const host = await connect('HostAlice');
+    host.send(MessageType.CREATE_ROOM, { roomName: 'Bulk Role Room', username: 'HostAlice' });
+    const state = (
+      await host.waitFor((message) => message.type === MessageType.ROOM_STATE, 'host state')
+    ).payload as RoomStatePayload;
+    const roomCode = state.roomCode;
+    const room = server.roomManager.getRoom(roomCode)!;
+
+    const guest1 = await connect('GuestBob');
+    guest1.send(MessageType.JOIN_ROOM, { roomCode, username: 'GuestBob' });
+    await guest1.waitFor((message) => message.type === MessageType.ROOM_STATE, 'guest1 state');
+
+    const guest2 = await connect('GuestCarol');
+    guest2.send(MessageType.JOIN_ROOM, { roomCode, username: 'GuestCarol' });
+    await guest2.waitFor((message) => message.type === MessageType.ROOM_STATE, 'guest2 state');
+
+    expect(room.participantCount).toBe(3);
+
+    // Non-host attempts setAllRole -> rejected FORBIDDEN
+    guest1.send(
+      MessageType.PERMISSION_CHANGE,
+      { setAllRole: Role.VIEWER },
+      { room: roomCode, user_id: guest1.userId },
+    );
+    await guest1.waitForError('FORBIDDEN');
+
+    // Host sets all to VIEWER
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { setAllRole: Role.VIEWER },
+      { room: roomCode, user_id: host.userId },
+    );
+    const setViewerMsg = await guest1.waitFor(
+      (message) => message.type === MessageType.PERMISSION_CHANGE,
+      'setAllRole VIEWER broadcast',
+    );
+    expect((setViewerMsg.payload as { setAllRole: Role }).setAllRole).toBe(Role.VIEWER);
+
+    // Check roles on room
+    const bob = room.getParticipant(guest1.userId)!;
+    const carol = room.getParticipant(guest2.userId)!;
+    const alice = room.getParticipant(host.userId)!;
+    expect(bob.role).toBe(Role.VIEWER);
+    expect(carol.role).toBe(Role.VIEWER);
+    expect(alice.role).toBe(Role.HOST);
+
+    // Host sets all back to EDITOR
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { setAllRole: Role.EDITOR },
+      { room: roomCode, user_id: host.userId },
+    );
+    const setEditorMsg = await guest2.waitFor(
+      (message) =>
+        message.type === MessageType.PERMISSION_CHANGE &&
+        (message.payload as { setAllRole?: Role }).setAllRole === Role.EDITOR,
+      'setAllRole EDITOR broadcast',
+    );
+    expect((setEditorMsg.payload as { setAllRole: Role }).setAllRole).toBe(Role.EDITOR);
+    expect(room.getParticipant(guest1.userId)!.role).toBe(Role.EDITOR);
+    expect(room.getParticipant(guest2.userId)!.role).toBe(Role.EDITOR);
+  });
+
+  it('allows the host to end the session for all participants with endSession', async () => {
+    const host = await connect('SessionHost');
+    host.send(MessageType.CREATE_ROOM, { roomName: 'Closing Room', username: 'SessionHost' });
+    const state = (
+      await host.waitFor((message) => message.type === MessageType.ROOM_STATE, 'host state')
+    ).payload as RoomStatePayload;
+    const roomCode = state.roomCode;
+
+    const guest = await connect('SessionGuest');
+    guest.send(MessageType.JOIN_ROOM, { roomCode, username: 'SessionGuest' });
+    await guest.waitFor((message) => message.type === MessageType.ROOM_STATE, 'guest state');
+
+    // Non-host attempts endSession -> rejected FORBIDDEN
+    guest.send(
+      MessageType.PERMISSION_CHANGE,
+      { endSession: true },
+      { room: roomCode, user_id: guest.userId },
+    );
+    await guest.waitForError('FORBIDDEN');
+
+    // Host ends session
+    host.send(
+      MessageType.PERMISSION_CHANGE,
+      { endSession: true, reason: 'Meeting concluded' },
+      { room: roomCode, user_id: host.userId },
+    );
+
+    const endMsg = await guest.waitFor(
+      (message) => message.type === MessageType.PERMISSION_CHANGE,
+      'endSession broadcast',
+    );
+    expect((endMsg.payload as { endSession: boolean; reason?: string }).endSession).toBe(true);
+    expect((endMsg.payload as { endSession: boolean; reason?: string }).reason).toBe(
+      'Meeting concluded',
+    );
+
+    // Room should be closed on the server
+    expect(server.roomManager.getRoom(roomCode)).toBeUndefined();
+  });
 });

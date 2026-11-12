@@ -79,6 +79,8 @@ export const PermissionChangePayloadSchema = z
     allowRejoin: z.boolean().optional(),
     removedParticipants: z.array(RemovedParticipantSchema).optional(),
     reason: z.string().max(256).optional(),
+    endSession: z.boolean().optional(),
+    setAllRole: RoleSchema.optional(),
   })
   .superRefine((payload, context) => {
     const participantActions = [
@@ -91,7 +93,9 @@ export const PermissionChangePayloadSchema = z
     const changesRoomSetting =
       payload.lockRoom !== undefined ||
       payload.allowNameChanges !== undefined ||
-      payload.defaultViewer !== undefined;
+      payload.defaultViewer !== undefined ||
+      payload.endSession !== undefined ||
+      payload.setAllRole !== undefined;
     if (!changesParticipant && !changesRoomSetting) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -110,10 +114,21 @@ export const PermissionChangePayloadSchema = z
         message: 'Participant changes and room setting changes must be separate requests',
       });
     }
-    if (payload.reason !== undefined && payload.kick !== true && payload.ban !== true) {
+    if (payload.setAllRole === Role.HOST) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'A reason is only valid when kicking or banning a participant',
+        message: 'Cannot set all participants to HOST',
+      });
+    }
+    if (
+      payload.reason !== undefined &&
+      payload.kick !== true &&
+      payload.ban !== true &&
+      payload.endSession !== true
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'A reason is only valid when kicking, banning, or ending session',
       });
     }
   });

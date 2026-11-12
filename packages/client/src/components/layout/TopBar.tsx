@@ -16,6 +16,7 @@ import {
   MessageSquare,
   Moon,
   Presentation,
+  Power,
   Search,
   Share2,
   Sun,
@@ -25,36 +26,72 @@ import {
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { exportBoardPdf, exportBoardPng } from '../../export/boardExport.js';
+import type { Participant, PermissionChangePayload, Role } from '@cn-whiteboard/common';
+
+export interface TopBarProps {
+  roomInfo: {
+    code: string;
+    name: string;
+    isHost: boolean;
+    locked: boolean;
+  } | null;
+  persistenceStatus?: string | null;
+  currentUser?: { id: string; username: string; color: string; role: Role } | null;
+  participants?: Participant[];
+  rightPanelOpen?: boolean;
+  rightPanelTab?: 'chat' | 'participants';
+  unreadChatCount?: number;
+  isDarkTheme?: boolean;
+  presentation?: { active: boolean };
+  setRightPanelOpen?: (open: boolean) => void;
+  setShareModalOpen?: (open: boolean) => void;
+  setConnectModalOpen?: (open: boolean) => void;
+  disconnectFromServer?: () => Promise<void>;
+  toggleTheme?: () => void;
+  requestSaveState?: () => Promise<void>;
+  exportBoard?: () => Promise<void>;
+  sendPermissionChange?: (payload: PermissionChangePayload) => void;
+  setPresenting?: (active: boolean) => void;
+  setVersionsOpen?: (open: boolean) => void;
+  searchOpen?: boolean;
+  setSearchOpen?: (open: boolean) => void;
+  setLoadModalOpen?: (open: boolean) => void;
+  setShortcutsModalOpen?: (open: boolean) => void;
+}
 
 export const TopBar: React.FC = () => {
+  const state = useWhiteboardStore();
+  return <TopBarContent {...state} />;
+};
+
+export const TopBarContent: React.FC<TopBarProps> = ({
+  roomInfo,
+  persistenceStatus = null,
+  currentUser = null,
+  participants = [],
+  rightPanelOpen = false,
+  rightPanelTab = 'chat',
+  unreadChatCount = 0,
+  isDarkTheme = true,
+  setRightPanelOpen = () => {},
+  setShareModalOpen = () => {},
+  setConnectModalOpen = () => {},
+  disconnectFromServer = async () => {},
+  toggleTheme = () => {},
+  requestSaveState = async () => {},
+  exportBoard = async () => {},
+  sendPermissionChange = () => {},
+  presentation = { active: false },
+  setPresenting = () => {},
+  setVersionsOpen = () => {},
+  searchOpen = false,
+  setSearchOpen = () => {},
+  setLoadModalOpen = () => {},
+  setShortcutsModalOpen = () => {},
+}) => {
   const [exportOpen, setExportOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   useClickOutside(exportOpen, exportMenuRef, () => setExportOpen(false));
-  const {
-    roomInfo,
-    persistenceStatus,
-    currentUser,
-    participants,
-    rightPanelOpen,
-    rightPanelTab,
-    unreadChatCount,
-    isDarkTheme,
-    setRightPanelOpen,
-    setShareModalOpen,
-    setConnectModalOpen,
-    disconnectFromServer,
-    toggleTheme,
-    requestSaveState,
-    exportBoard,
-    sendPermissionChange,
-    presentation,
-    setPresenting,
-    setVersionsOpen,
-    searchOpen,
-    setSearchOpen,
-    setLoadModalOpen,
-    setShortcutsModalOpen,
-  } = useWhiteboardStore();
 
   const getInitials = (name: string): string => {
     return name
@@ -163,6 +200,25 @@ export const TopBar: React.FC = () => {
                 >
                   <Upload className="h-4 w-4" />
                   Load
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'Are you sure you want to end this whiteboard session for everyone? All participants will be disconnected.',
+                      )
+                    ) {
+                      sendPermissionChange({ endSession: true, reason: 'Session ended by host' });
+                      void disconnectFromServer();
+                    }
+                  }}
+                  title="End whiteboard session for everyone"
+                  aria-label="End session"
+                  className="flex h-8 items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2 text-xs font-semibold text-rose-600 hover:bg-rose-500/20 dark:text-rose-400 dark:hover:bg-rose-500/25 transition"
+                >
+                  <Power className="h-3.5 w-3.5" />
+                  End Session
                 </button>
               </>
             )}

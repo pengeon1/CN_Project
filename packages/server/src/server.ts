@@ -555,10 +555,34 @@ export class WhiteboardServer {
             return;
           }
 
+          if (payload.endSession) {
+            const endPayload: PermissionChangePayload = {
+              endSession: true,
+              reason: payload.reason || 'The host has ended the session',
+            };
+            const permissionEvent = room.recordEvent(
+              MessageType.PERMISSION_CHANGE,
+              endPayload,
+              session.userId,
+            );
+            room.broadcast(
+              createEnvelope(MessageType.PERMISSION_CHANGE, endPayload, {
+                msg_id: envelope.msg_id,
+                seq: permissionEvent.seq,
+                room: room.code,
+                user_id: session.userId,
+                ts: permissionEvent.ts,
+              }),
+            );
+            this.roomManager.closeRoom(room.code, 'Session ended by host');
+            return;
+          }
+
           if (
             payload.lockRoom !== undefined ||
             payload.allowNameChanges !== undefined ||
-            payload.defaultViewer !== undefined
+            payload.defaultViewer !== undefined ||
+            payload.setAllRole !== undefined
           ) {
             if (payload.lockRoom !== undefined) {
               room.locked = payload.lockRoom;
@@ -568,6 +592,13 @@ export class WhiteboardServer {
             }
             if (payload.defaultViewer !== undefined) {
               room.setDefaultViewer(payload.defaultViewer);
+            }
+            if (payload.setAllRole !== undefined && payload.setAllRole !== Role.HOST) {
+              for (const p of room.getParticipants()) {
+                if (p.role !== Role.HOST) {
+                  room.setParticipantRole(p.id, payload.setAllRole);
+                }
+              }
             }
           } else if (payload.targetUserId) {
             const target = room.getParticipant(payload.targetUserId);

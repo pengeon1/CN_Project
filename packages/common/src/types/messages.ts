@@ -204,6 +204,8 @@ export interface PermissionChangePayload {
   allowRejoin?: boolean;
   removedParticipants?: RemovedParticipant[];
   reason?: string;
+  endSession?: boolean;
+  setAllRole?: Role;
 }
 
 export interface StrokeBeginPayload {

@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   MousePointer2,
   Pencil,
+  Power,
   Search,
   Square,
   StickyNote,
@@ -79,6 +80,7 @@ export interface LeftToolbarProps {
   setLoadModalOpen: (open: boolean) => void;
   setVersionsOpen: (open: boolean) => void;
   setShortcutsModalOpen: (open: boolean) => void;
+  disconnectFromServer?: () => Promise<void>;
   initialMoreMenuOpen?: boolean;
 }
 
@@ -102,6 +104,7 @@ export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
   setLoadModalOpen,
   setVersionsOpen,
   setShortcutsModalOpen,
+  disconnectFromServer,
   initialMoreMenuOpen = false,
 }) => {
   const [moreMenuOpen, setMoreMenuOpen] = useState(initialMoreMenuOpen);
@@ -331,6 +334,27 @@ export const LeftToolbarContent: React.FC<LeftToolbarProps> = ({
                     }`}
                   >
                     {roomInfo?.defaultViewer ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    if (
+                      window.confirm(
+                        'Are you sure you want to end this whiteboard session for everyone? All participants will be disconnected.',
+                      )
+                    ) {
+                      sendPermissionChange({ endSession: true, reason: 'Session ended by host' });
+                      void disconnectFromServer?.();
+                    }
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-rose-500/15 transition text-rose-300 hover:text-rose-200"
+                >
+                  <span className="flex items-center gap-2">
+                    <Power className="h-4 w-4 text-rose-400" />
+                    <span>End Session</span>
                   </span>
                 </button>
               </>

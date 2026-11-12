@@ -1785,6 +1785,73 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
       case MessageType.PERMISSION_CHANGE: {
         const payload = envelope.payload as PermissionChangePayload;
         const { currentUser } = get();
+
+        if (payload.endSession) {
+          const api = getElectronAPI();
+          if (api) {
+            void api.disconnect().catch(() => {});
+          }
+          set({
+            accessNotice: {
+              title: 'Session Ended',
+              message: payload.reason || 'The host has ended this whiteboard session.',
+            },
+            connectionStatus: 'disconnected',
+            roomPassword: undefined,
+            roomInfo: null,
+            persistenceStatus: null,
+            currentUser: null,
+            participants: [],
+            chatMessages: [],
+            objects: {},
+            liveLocalStroke: null,
+            remoteCursors: {},
+            lastAppliedSeq: 0,
+            undoStack: [],
+            redoStack: [],
+            activeTool: 'select',
+          });
+          break;
+        }
+
+        if (payload.setAllRole) {
+          const newRole = payload.setAllRole;
+          const wasViewerNotice =
+            currentUser &&
+            currentUser.role !== Role.HOST &&
+            newRole === Role.VIEWER &&
+            currentUser.role !== Role.VIEWER;
+          if (wasViewerNotice) {
+            set({
+              accessNotice: {
+                title: 'View-only access',
+                message:
+                  'The host changed all participants to Viewer. You can view the board but cannot edit it.',
+              },
+              activeTool: 'select',
+            });
+          }
+          set((state) => {
+            const updatedParticipants = state.participants.map((p) =>
+              p.role === Role.HOST ? p : { ...p, role: newRole },
+            );
+            const updatedCurrent =
+              state.currentUser && state.currentUser.role !== Role.HOST
+                ? { ...state.currentUser, role: newRole }
+                : state.currentUser;
+            const stillCanEdit =
+              !updatedCurrent ||
+              (canMutateCanvas(updatedCurrent.role) &&
+                (!state.roomInfo?.locked || isHost(updatedCurrent.role)));
+            return {
+              participants: updatedParticipants,
+              currentUser: updatedCurrent,
+              activeTool: stillCanEdit ? state.activeTool : 'select',
+            };
+          });
+          break;
+        }
+
         if ((payload.kick || payload.ban) && payload.targetUserId === currentUser?.id) {
           const api = getElectronAPI();
           if (api) {

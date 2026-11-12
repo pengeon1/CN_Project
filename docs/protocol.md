@@ -113,7 +113,7 @@ Initiates the handshake upon establishing a TCP socket connection.
   "room": "",
   "user_id": "",
   "payload": {
-    "clientVersion": "1.0.2",
+    "clientVersion": "1.0.3",
     "suggestedUsername": "Alice"
   }
 }
@@ -1163,7 +1163,7 @@ Everything above runs over TCP. The one exception is **server discovery**, which
 
 ```json
 { "magic": "CN-WHITEBOARD", "v": 1, "type": "PROBE" }
-{ "magic": "CN-WHITEBOARD", "v": 1, "type": "ANNOUNCE", "name": "lab-pc", "port": 4000, "rooms": 2, "appVersion": "1.0.2" }
+{ "magic": "CN-WHITEBOARD", "v": 1, "type": "ANNOUNCE", "name": "lab-pc", "port": 4000, "rooms": 2, "appVersion": "1.0.3" }
 ```
 
 **Safety properties**

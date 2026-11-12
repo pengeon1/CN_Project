@@ -115,7 +115,7 @@
     <h1>LAN-Based Multi-User Collaborative Whiteboard: Technical Documentation &amp; User Guide</h1>
     <p><strong>Course</strong>: Computer Networks Practice (CS3004)</p>
     <p><strong>Academic Year</strong>: 2026-2027</p>
-    <p><strong>Document Revision</strong>: 1.0.2</p>
+    <p><strong>Document Revision</strong>: 1.0.3</p>
     <p><strong>Deliverable</strong>: Comprehensive Technical Report &amp; User Guide</p>
     <hr />
     <h2>Abstract</h2>
@@ -435,7 +435,8 @@ class Room {
       <li>
         <strong><code>HOST</code></strong
         >: Full control (clear canvas, kick/ban users or re-admit kicked users, promote/demote
-        roles, toggle default joinees to viewer, lock room, presentation mode, version restore).
+        roles, toggle default joinees to viewer, bulk set all participants to viewer/editor, end
+        session, lock room, presentation mode, version restore).
       </li>
       <li>
         <strong><code>EDITOR</code></strong
@@ -444,8 +445,8 @@ class Room {
       </li>
       <li>
         <strong><code>VIEWER</code></strong
-        >: Read-only observation (receives live canvas updates, can pan/zoom and text chat; canvas
-        and laser mutations are rejected server-side).
+        >: Read-only observation (receives live canvas updates, can pan/zoom, toggle remote cursor
+        visibility, and text chat; canvas and laser mutations are rejected server-side).
       </li>
       <p>
         2. <strong>Password Protection</strong>: Room passwords are salted and hashed using
@@ -487,14 +488,14 @@ chmod +x ./whiteboard-server-linux-x64
 </code></pre>
     <h3>8.2 Installing &amp; Connecting Clients (Per OS)</h3>
     <p>
-      1. <strong>Windows</strong>: Run <code>LAN-Whiteboard-1.0.2-win-x64-nsis.exe</code> (or
+      1. <strong>Windows</strong>: Run <code>LAN-Whiteboard-1.0.3-win-x64-nsis.exe</code> (or
       <code>-portable.exe</code>). If Windows SmartScreen appears, click
       <strong>More info -&gt; Run anyway</strong>.
     </p>
     <p>
-      2. <strong>macOS</strong>: Open <code>LAN-Whiteboard-1.0.2-mac-arm64.dmg</code> (or
+      2. <strong>macOS</strong>: Open <code>LAN-Whiteboard-1.0.3-mac-arm64.dmg</code> (or
       <code>-x64.dmg</code> / <code>.zip</code>; run
-      <code>xattr -cr ~/Downloads/LAN-Whiteboard-1.0.2-mac-*.dmg</code> if quarantined), drag
+      <code>xattr -cr ~/Downloads/LAN-Whiteboard-1.0.3-mac-*.dmg</code> if quarantined), drag
       <strong><code>LAN Whiteboard.app</code></strong> to <strong>Applications</strong>, then run
       <code
         >xattr -cr "/Applications/LAN Whiteboard.app" &amp;&amp; open "/Applications/LAN
@@ -504,8 +505,8 @@ chmod +x ./whiteboard-server-linux-x64
     <p>
       3. <strong>Linux</strong>: Run
       <code
-        >chmod +x ./LAN-Whiteboard-1.0.2-linux-x64.AppImage &amp;&amp;
-        ./LAN-Whiteboard-1.0.2-linux-x64.AppImage</code
+        >chmod +x ./LAN-Whiteboard-1.0.3-linux-x64.AppImage &amp;&amp;
+        ./LAN-Whiteboard-1.0.3-linux-x64.AppImage</code
       >
       (pass <code>--appimage-extract-and-run</code> if FUSE is unavailable).
     </p>
@@ -548,8 +549,12 @@ chmod +x ./whiteboard-server-linux-x64
         (<code>L</code>), and Smart Orthogonal Connectors (<code>X</code> / <code>C</code>).
       </li>
       <li>
-        <strong>Text Box (<code>T</code>)</strong>: Place resizable multiline text blocks and type
-        immediately.
+        <strong>Color Selection</strong>: Floating property bar supports preset swatches and an
+        interactive hex color spectrum picker (<code>+</code> button).
+      </li>
+      <li>
+        <strong>Text Box (<code>T</code>)</strong>: Place resizable multiline text blocks; press
+        <code>Enter</code> to commit text, or <code>Shift+Enter</code> for a newline.
       </li>
       <li>
         <strong>Sticky Note (<code>S</code>)</strong>: Colored brainstorming cards with instant
@@ -557,11 +562,11 @@ chmod +x ./whiteboard-server-linux-x64
       </li>
       <li>
         <strong>Image (<code>...</code> menu)</strong>: Insert local images (PNG/JPEG/WebP) with
-        chunked network transfer.
+        chunked network transfer and immediate on-canvas corner resize handles.
       </li>
       <li>
-        <strong>Laser Pointer (<code>K</code>)</strong>: Smooth synchronized glowing pointer for
-        highlighting areas during presentations.
+        <strong>Laser Pointer (<code>K</code>)</strong>: Smooth synchronized glowing pointer
+        (editor-gated) for highlighting areas during presentations.
       </li>
       <li>
         <strong>Board Search, Saves &amp; Shortcuts (<code>Ctrl+F</code> / <code>?</code>)</strong>:
@@ -582,8 +587,9 @@ chmod +x ./whiteboard-server-linux-x64
         sidebar.
       </li>
       <li>
-        Switch to the <strong>Participants</strong> tab to view connected peers, check their
-        assigned colors, or (if Host) manage their roles.
+        Switch to the <strong>Participants</strong> tab to search connected peers by name (with
+        editors pinned to top), check assigned colors, or (if Host) manage roles, bulk set roles to
+        viewer/editor, or end the session.
       </li>
     </ul>
     <hr />
@@ -591,7 +597,7 @@ chmod +x ./whiteboard-server-linux-x64
     <h3>9.1 Automated Test Suite</h3>
     <p>
       The codebase is validated by
-      <strong>184 automated unit and integration tests across 26 test suites</strong>:
+      <strong>199 automated unit and integration tests across 26 test suites</strong>:
     </p>
     <ul>
       <li>

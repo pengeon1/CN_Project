@@ -36,7 +36,7 @@ npm run smoke:server -- release/server/whiteboard-server-linux-x64   # verify an
 - **`release.yml`**: pushing a tag `vX.Y.Z` runs the same build and verification matrix across all three OSes, then a final `publish` job downloads every artifact, generates `SHA256SUMS.txt` checksums, renders the curated release write-up from `.github/release-body.md`, and publishes **one GitHub Release** using that release overview (with auto-generated commit/contributor lists disabled).
 
 ```bash
-git tag v1.0.2 && git push origin v1.0.2     # publishes a release
+git tag v1.0.3 && git push origin v1.0.3     # publishes a release
 ```
 
 ## Running the server

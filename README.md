@@ -44,7 +44,7 @@ Prebuilt, self-contained executables (server + desktop client for Windows, Linux
 
 ### Running Downloaded Binaries (Step-by-Step by OS)
 
-Download the release binaries from [GitHub Releases](https://github.com/pengeon1/CN_Project/releases) (`1.0.2` filenames below). Start **one server** on a host machine on your LAN, then run the **client** on each participant's machine.
+Download the release binaries from [GitHub Releases](https://github.com/pengeon1/CN_Project/releases) (`1.0.3` filenames below). Start **one server** on a host machine on your LAN, then run the **client** on each participant's machine.
 
 #### Windows (x64)
 
@@ -53,7 +53,7 @@ Download the release binaries from [GitHub Releases](https://github.com/pengeon1
    .\whiteboard-server-win-x64.exe --port 4000 --data-dir ./data
    ```
    Allow **Private networks** when Windows Defender Firewall prompts (TCP `4000` & UDP `45454`).
-2. Run `LAN-Whiteboard-1.0.2-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.2-win-x64-portable.exe`. If Windows SmartScreen appears, click **More info** -> **Run anyway**.
+2. Run `LAN-Whiteboard-1.0.3-win-x64-nsis.exe` (installer) or `LAN-Whiteboard-1.0.3-win-x64-portable.exe`. If Windows SmartScreen appears, click **More info** -> **Run anyway**.
 3. Pick the discovered server (or enter the host LAN IP & port `4000`) and create or join a room.
 
 #### macOS (Apple Silicon `arm64` & Intel `x64`)
@@ -65,7 +65,7 @@ Download the release binaries from [GitHub Releases](https://github.com/pengeon1
    ./whiteboard-server-macos-arm64 --port 4000 --data-dir ./data   # use -x64 on Intel Macs
    ```
    Click **Allow** when macOS asks to allow incoming network connections.
-2. Open `LAN-Whiteboard-1.0.2-mac-arm64.dmg` (or `-x64.dmg`; if macOS blocked the `.dmg` download, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.2-mac-*.dmg` first) and drag **`LAN Whiteboard.app`** to **Applications** (or extract the `.zip`).
+2. Open `LAN-Whiteboard-1.0.3-mac-arm64.dmg` (or `-x64.dmg`; if macOS blocked the `.dmg` download, run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.3-mac-*.dmg` first) and drag **`LAN Whiteboard.app`** to **Applications** (or extract the `.zip`).
 3. Clear the download quarantine flag once (builds are ad-hoc signed without paid Apple notarization) and open the app:
    ```bash
    xattr -cr "/Applications/LAN Whiteboard.app"
@@ -82,8 +82,8 @@ Download the release binaries from [GitHub Releases](https://github.com/pengeon1
    ```
 2. Make the AppImage executable and run it:
    ```bash
-   chmod +x ./LAN-Whiteboard-1.0.2-linux-x64.AppImage
-   ./LAN-Whiteboard-1.0.2-linux-x64.AppImage
+   chmod +x ./LAN-Whiteboard-1.0.3-linux-x64.AppImage
+   ./LAN-Whiteboard-1.0.3-linux-x64.AppImage
    ```
    If FUSE (`libfuse2`) is missing (Ubuntu 22.04+/24.04+), add `--appimage-extract-and-run` (and `--no-sandbox` if user namespaces are restricted).
 3. Pick the discovered server (or enter the host LAN IP & port `4000`) and create or join a room.
@@ -94,9 +94,9 @@ See [`docs/packaging.md`](docs/packaging.md) for checksum verification, local pa
 
 ## Key Features
 
-- **Real-Time Canvas & Diagramming**: Smooth calligraphy pen (`perfect-freehand`), object-level eraser, rectangles and ellipses (with outline colors, fill colors, and centered inline text), smart orthogonal connectors anchored to shapes, arrows, straight lines, resizable text boxes, sticky notes, and chunked image insertion (PNG/JPEG/WebP/GIF/BMP).
-- **Session Control & Access Security**: Unambiguous 6-character room codes, optional `scrypt`-hashed room passwords with brute-force IP rate limiting, role-based access control (`HOST` / `EDITOR` / `VIEWER`), room locking, Share modal with LAN IP detection and password toggle, and automatic cleanup of expired empty rooms.
-- **Live Presence, Presentation & Chat**: Color-coded remote cursors, Host-driven Presentation Mode with synchronized viewport and smooth laser pointer, chronological group chat with unread badges, and Host participant moderation.
+- **Real-Time Canvas & Diagramming**: Smooth calligraphy pen (`perfect-freehand`), object-level eraser, rectangles and ellipses (with outline colors, fill colors, and centered inline text), hex-choosable GUI color picker with spectrum slider, instant selection & corner resizing of newly inserted images/shapes, smart orthogonal connectors anchored to shapes, arrows, straight lines, multiline text boxes (`Enter` to finish, `Shift+Enter` for newline), sticky notes, and chunked image insertion (PNG/JPEG/WebP/GIF/BMP).
+- **Session Control & Access Security**: Unambiguous 6-character room codes, optional `scrypt`-hashed room passwords with brute-force IP rate limiting, role-based access control (`HOST` / `EDITOR` / `VIEWER`) with **Default new joinees to Viewer**, bulk **Set all to Viewer** / **Set all to Editor**, host **End Session**, participant search by name with editors pinned to top, room locking, Share modal with LAN IP detection and password toggle, and automatic cleanup of expired empty rooms.
+- **Live Presence, Presentation & Chat**: Color-coded remote cursors with visibility toggle, Host-driven Presentation Mode with synchronized viewport and smooth laser pointer (editor-gated), chronological group chat with unread badges, and Host participant moderation (Kick with re-admission and permanent room Ban).
 - **Reliability & Persistence**: Length-prefixed TCP framing, monotonic server sequencing (`seq`), `op_id` deduplication, per-user isolated undo/redo, offline outbox, heartbeat watchdogs, session token reconnection with incremental gap resync, named Version History snapshots, server save/load selector, board text search (`Ctrl+F`), full shortcuts modal (`?`), light/dark themes, and PNG / PDF / JSON export.
 
 ---
@@ -111,7 +111,7 @@ See [`docs/packaging.md`](docs/packaging.md) for checksum verification, local pa
 | **Desktop Client** | Electron 45, React 18, Vite 6, Tailwind CSS                              |
 | **Canvas Engine**  | Custom HTML5 Canvas 2D renderer with `perfect-freehand`                  |
 | **State & Icons**  | Zustand, Lucide React                                                    |
-| **Testing**        | Vitest (184 unit & real-socket tests across 26 suites + lossy TCP proxy) |
+| **Testing**        | Vitest (199 unit & real-socket tests across 26 suites + lossy TCP proxy) |
 | **Packaging**      | `@yao-pkg/pkg` (Server binary), `electron-builder` (Client installers)   |
 
 ---

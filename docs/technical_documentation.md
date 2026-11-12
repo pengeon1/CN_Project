@@ -2,7 +2,7 @@
 
 **Course**: Computer Networks Practice (CS3004)  
 **Academic Year**: 2026-2027  
-**Document Revision**: 1.0.2  
+**Document Revision**: 1.0.3  
 **Deliverable**: Comprehensive Technical Report & User Guide
 
 ---
@@ -209,9 +209,9 @@ Unlike single-user applications where undo pops the global history stack, our sy
 ## 7. Security & Access Control
 
 1. **Role-Based Access Control (RBAC)**:
-   - **`HOST`**: Full control (clear canvas, kick/ban users or re-admit kicked users, promote/demote roles, toggle default joinees to viewer, lock room, presentation mode, version restore).
+   - **`HOST`**: Full control (clear canvas, kick/ban users or re-admit kicked users, promote/demote roles, toggle default joinees to viewer, bulk set all participants to viewer/editor, end session, lock room, presentation mode, version restore).
    - **`EDITOR`**: Read/write access (draw, erase, insert/resize shapes and images, text, laser pointer, chat).
-   - **`VIEWER`**: Read-only observation (receives live canvas updates, can pan/zoom and text chat; canvas and laser mutations are rejected server-side).
+   - **`VIEWER`**: Read-only observation (receives live canvas updates, can pan/zoom, toggle remote cursor visibility, and text chat; canvas and laser mutations are rejected server-side).
 2. **Password Protection**: Room passwords are salted and hashed using Node.js's native `crypto.scrypt` (64-byte key length). Passwords are never stored in plaintext.
 3. **Brute-Force Rate Limiting**: Client IP addresses are tracked; 5 failed password attempts within 60 seconds trigger automatic rate-limit throttling.
 4. **Input Sanitization**: Every inbound frame is validated via Zod schemas. Malformed payloads or illegal coordinate ranges are dropped before reaching application logic.
@@ -248,9 +248,9 @@ The server displays its LAN IP addresses on startup:
 
 ### 8.2 Installing & Connecting Clients (Per OS)
 
-1. **Windows**: Run `LAN-Whiteboard-1.0.2-win-x64-nsis.exe` (or `-portable.exe`). If Windows SmartScreen appears, click **More info -> Run anyway**.
-2. **macOS**: Open `LAN-Whiteboard-1.0.2-mac-arm64.dmg` (or `-x64.dmg` / `.zip`; run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.2-mac-*.dmg` if quarantined), drag **`LAN Whiteboard.app`** to **Applications**, then run `xattr -cr "/Applications/LAN Whiteboard.app" && open "/Applications/LAN Whiteboard.app"`.
-3. **Linux**: Run `chmod +x ./LAN-Whiteboard-1.0.2-linux-x64.AppImage && ./LAN-Whiteboard-1.0.2-linux-x64.AppImage` (pass `--appimage-extract-and-run` if FUSE is unavailable).
+1. **Windows**: Run `LAN-Whiteboard-1.0.3-win-x64-nsis.exe` (or `-portable.exe`). If Windows SmartScreen appears, click **More info -> Run anyway**.
+2. **macOS**: Open `LAN-Whiteboard-1.0.3-mac-arm64.dmg` (or `-x64.dmg` / `.zip`; run `xattr -cr ~/Downloads/LAN-Whiteboard-1.0.3-mac-*.dmg` if quarantined), drag **`LAN Whiteboard.app`** to **Applications**, then run `xattr -cr "/Applications/LAN Whiteboard.app" && open "/Applications/LAN Whiteboard.app"`.
+3. **Linux**: Run `chmod +x ./LAN-Whiteboard-1.0.3-linux-x64.AppImage && ./LAN-Whiteboard-1.0.3-linux-x64.AppImage` (pass `--appimage-extract-and-run` if FUSE is unavailable).
 4. Enter your display name, select an auto-discovered server under **Find servers on this network** (or enter IP + port `4000` manually), and create or join a room.
 
 ### 8.3 Hosting and Joining Sessions
@@ -264,17 +264,18 @@ The server displays its LAN IP addresses on startup:
 - **Pen (`P`)**: Freehand drawing with smooth anti-aliased calligraphy strokes.
 - **Eraser (`E`)**: Object-level eraser with collision hit-testing.
 - **Shapes (`R` / `O` / `N` / `L` / `X` / `C`)**: Draw Rectangles (`R`) and Ellipses (`O`) with outline and fill colors plus centered inline text, Straight Lines (`N`), Directional Arrows (`L`), and Smart Orthogonal Connectors (`X` / `C`).
-- **Text Box (`T`)**: Place resizable multiline text blocks and type immediately.
+- **Color Selection**: Floating property bar supports preset swatches and an interactive hex color spectrum picker (`+` button).
+- **Text Box (`T`)**: Place resizable multiline text blocks; press `Enter` to commit text, or `Shift+Enter` for a newline.
 - **Sticky Note (`S`)**: Colored brainstorming cards with instant inline editing.
-- **Image (`...` menu)**: Insert local images (PNG/JPEG/WebP) with chunked network transfer.
-- **Laser Pointer (`K`)**: Smooth synchronized glowing pointer for highlighting areas during presentations.
+- **Image (`...` menu)**: Insert local images (PNG/JPEG/WebP) with chunked network transfer and immediate on-canvas corner resize handles.
+- **Laser Pointer (`K`)**: Smooth synchronized glowing pointer (editor-gated) for highlighting areas during presentations.
 - **Board Search, Saves & Shortcuts (`Ctrl+F` / `?`)**: Find text on the canvas (`Ctrl+F`), pick saved snapshots from **Load** / `...`, or open the full shortcut reference (`?`).
 - **Canvas Navigation**: Hold `Spacebar` + Drag (or Middle Mouse Drag) to Pan; `Ctrl` + Scroll or bottom-right `-` / `100%` / `+` controls to Zoom.
 
 ### 8.5 Group Chat & Collaboration
 
 - Click the **Chat** icon in the Top Bar to toggle the real-time group chat sidebar.
-- Switch to the **Participants** tab to view connected peers, check their assigned colors, or (if Host) manage their roles.
+- Switch to the **Participants** tab to search connected peers by name (with editors pinned to top), check assigned colors, or (if Host) manage roles, bulk set roles to viewer/editor, or end the session.
 
 ---
 
@@ -282,7 +283,7 @@ The server displays its LAN IP addresses on startup:
 
 ### 9.1 Automated Test Suite
 
-The codebase is validated by **184 automated unit and integration tests across 26 test suites**:
+The codebase is validated by **199 automated unit and integration tests across 26 test suites**:
 
 - **Framing & Protocol**: Tested against stream fragmentation, frame coalescing, 8 MB oversize rejection, and malformed JSON recovery.
 - **Multi-Client Concurrency**: Real TCP sockets concurrently generating strokes, shapes, and chat messages without state divergence.

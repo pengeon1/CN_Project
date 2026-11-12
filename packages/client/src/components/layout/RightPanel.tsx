@@ -3,8 +3,19 @@
  * Houses the real-time group chat channel and active room participant list.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { MessageSquare, Pencil, Send, Shield, Users, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Edit3,
+  Eye,
+  MessageSquare,
+  Pencil,
+  Power,
+  Search,
+  Send,
+  Shield,
+  Users,
+  X,
+} from 'lucide-react';
 import {
   type Participant,
   type PermissionChangePayload,
@@ -34,11 +45,18 @@ export interface RightPanelProps {
   setRightPanelOpen: (open: boolean) => void;
   setRightPanelTab: (tab: 'chat' | 'participants') => void;
   sendChatMessage: (text: string) => void;
+  disconnectFromServer?: () => Promise<void>;
 }
 
 export const RightPanel: React.FC = () => {
   const state = useWhiteboardStore();
   return <RightPanelContent {...state} />;
+};
+
+const roleRank: Record<Role, number> = {
+  [Role.HOST]: 0,
+  [Role.EDITOR]: 1,
+  [Role.VIEWER]: 2,
 };
 
 export const RightPanelContent: React.FC<RightPanelProps> = ({
@@ -54,9 +72,24 @@ export const RightPanelContent: React.FC<RightPanelProps> = ({
   setRightPanelOpen,
   setRightPanelTab,
   sendChatMessage,
+  disconnectFromServer,
 }) => {
   const [inputDraft, setInputDraft] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const sortedAndFilteredParticipants = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const list = q
+      ? participants.filter((p) => p.username.toLowerCase().includes(q))
+      : participants;
+
+    return [...list].sort((a, b) => {
+      const rankDiff = roleRank[a.role] - roleRank[b.role];
+      if (rankDiff !== 0) return rankDiff;
+      return a.username.localeCompare(b.username);
+    });
+  }, [participants, searchQuery]);
 
   useEffect(() => {
     if (rightPanelTab === 'chat') {
@@ -203,27 +236,93 @@ export const RightPanelContent: React.FC<RightPanelProps> = ({
       {/* Tab 2: Participants List */}
       {rightPanelTab === 'participants' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {/* Participant search input */}
+          <div className="relative mb-2 flex items-center">
+            <Search className="absolute left-2.5 h-3.5 w-3.5 text-slate-500 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search participants by name..."
+              aria-label="Search participants"
+              className="w-full rounded-xl border border-slate-800 bg-slate-900/80 pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none transition"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 text-slate-400 hover:text-slate-200"
+                title="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
           {currentUser?.role === Role.HOST && (
-            <label className="mb-2 flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-300">
-              <span>
-                <span className="block font-semibold text-slate-200">
-                  Default new joinees to Viewer
+            <div className="mb-3 space-y-2 rounded-xl border border-slate-800 bg-slate-900/70 p-2.5">
+              <label className="flex cursor-pointer items-center justify-between gap-2 text-[11px] text-slate-300">
+                <span>
+                  <span className="block font-semibold text-slate-200">
+                    Default new joinees to Viewer
+                  </span>
+                  <span className="block text-[10px] text-slate-500">
+                    New participants join read-only until promoted.
+                  </span>
                 </span>
-                <span className="block text-[10px] text-slate-500">
-                  New participants join read-only until promoted.
-                </span>
-              </span>
-              <input
-                type="checkbox"
-                checked={Boolean(roomInfo?.defaultViewer)}
-                onChange={(event) =>
-                  sendPermissionChange({ defaultViewer: event.currentTarget.checked })
-                }
-                className="h-4 w-4 accent-indigo-500"
-              />
-            </label>
+                <input
+                  type="checkbox"
+                  checked={Boolean(roomInfo?.defaultViewer)}
+                  onChange={(event) =>
+                    sendPermissionChange({ defaultViewer: event.currentTarget.checked })
+                  }
+                  className="h-4 w-4 accent-indigo-500"
+                />
+              </label>
+
+              {/* Bulk role changes */}
+              <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Set all non-host participants to Editor role?')) {
+                      sendPermissionChange({ setAllRole: Role.EDITOR });
+                    }
+                  }}
+                  title="Grant editing permissions to all participants"
+                  aria-label="Set all participants to Editor"
+                  className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-blue-500/30 bg-blue-600/15 px-2 py-1.5 text-[10px] font-semibold text-blue-300 hover:bg-blue-600/25 hover:text-blue-200 transition"
+                >
+                  <Edit3 className="h-3 w-3" />
+                  <span>All to Editor</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm('Set all non-host participants to Viewer role (read-only)?')
+                    ) {
+                      sendPermissionChange({ setAllRole: Role.VIEWER });
+                    }
+                  }}
+                  title="Switch all participants to view-only mode"
+                  aria-label="Set all participants to Viewer"
+                  className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-amber-500/30 bg-amber-600/15 px-2 py-1.5 text-[10px] font-semibold text-amber-300 hover:bg-amber-600/25 hover:text-amber-200 transition"
+                >
+                  <Eye className="h-3 w-3" />
+                  <span>All to Viewer</span>
+                </button>
+              </div>
+            </div>
           )}
-          {participants.map((p) => {
+
+          {sortedAndFilteredParticipants.length === 0 && (
+            <div className="py-8 text-center text-xs text-slate-500">
+              No participants found matching &ldquo;{searchQuery}&rdquo;
+            </div>
+          )}
+
+          {sortedAndFilteredParticipants.map((p) => {
             const isMe = currentUser?.id === p.id;
             return (
               <div
@@ -391,6 +490,30 @@ export const RightPanelContent: React.FC<RightPanelProps> = ({
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {currentUser?.role === Role.HOST && (
+            <div className="pt-3 mt-3 border-t border-slate-800/80">
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Are you sure you want to end this whiteboard session for everyone? All participants will be disconnected.',
+                    )
+                  ) {
+                    sendPermissionChange({ endSession: true, reason: 'Session ended by host' });
+                    void disconnectFromServer?.();
+                  }
+                }}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-rose-500/40 bg-rose-600/15 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-600/30 hover:text-rose-200 transition shadow-sm"
+                title="End whiteboard session for everyone"
+                aria-label="End session for everyone"
+              >
+                <Power className="h-3.5 w-3.5 text-rose-400" />
+                <span>End Session for Everyone</span>
+              </button>
             </div>
           )}
         </div>

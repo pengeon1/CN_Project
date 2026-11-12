@@ -25,6 +25,13 @@ import { ConnectDialog } from '../src/components/dialogs/ConnectDialog.js';
 import { computeResizedObjectChanges, pickHandle } from '../src/components/canvas/shapes.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
 import { shouldDismissOnOutsideEvent } from '../src/hooks/useClickOutside.js';
+import {
+  HexColorPicker,
+  hexToHue,
+  hslToHex,
+  normalizeHexColor,
+} from '../src/components/layout/HexColorPicker.js';
+import { TopBarContent } from '../src/components/layout/TopBar.js';
 import type { ElectronWhiteboardAPI } from '../src/types/ipc.js';
 
 describe('Client UI & Store Suite', () => {
@@ -1872,6 +1879,293 @@ describe('Client UI & Store Suite', () => {
         'Permanently banned from the room',
       );
       expect(useWhiteboardStore.getState().roomInfo).toBeNull();
+    });
+
+    it('validates hex colors and renders hex-choosable GUI color palette', () => {
+      // 1. normalizeHexColor utility tests
+      expect(normalizeHexColor('#18a0fb')).toBe('#18A0FB');
+      expect(normalizeHexColor('3b82f6')).toBe('#3B82F6');
+      expect(normalizeHexColor('#fff')).toBe('#FFFFFF');
+      expect(normalizeHexColor('abc')).toBe('#AABBCC');
+      expect(normalizeHexColor('invalid')).toBeNull();
+      expect(normalizeHexColor('#12')).toBeNull();
+      expect(normalizeHexColor('')).toBeNull();
+
+      // hslToHex & hexToHue tests
+      expect(hslToHex(0, 100, 50)).toBe('#FF0000');
+      expect(hslToHex(120, 100, 50)).toBe('#00FF00');
+      expect(hslToHex(240, 100, 50)).toBe('#0000FF');
+      expect(hexToHue('#FF0000')).toBe(0);
+      expect(hexToHue('#00FF00')).toBe(120);
+      expect(hexToHue('#0000FF')).toBe(240);
+
+      // 2. HexColorPicker component markup
+      const pickerHtml = renderToStaticMarkup(
+        React.createElement(HexColorPicker, {
+          label: 'Stroke & Text Color',
+          currentColor: '#3B82F6',
+          onChangeColor: (_hex) => {},
+          canClear: true,
+          clearLabel: 'No Color',
+          onClearColor: () => {},
+          showTints: true,
+        }),
+      );
+      expect(pickerHtml).toContain('Stroke &amp; Text Color');
+      expect(pickerHtml).toContain('No Color');
+      expect(pickerHtml).toContain('Soft Tints &amp; Pastels');
+      expect(pickerHtml).toContain('Curated Palette');
+      expect(pickerHtml).toContain('3B82F6');
+      expect(pickerHtml).toContain('type="color"');
+      expect(pickerHtml).toContain('Spectrum Hue Slider');
+      expect(pickerHtml).toContain('type="range"');
+
+      // 3. PropertyBar renders Hex Color Palette trigger button with current hex
+      useWhiteboardStore.setState({
+        activeTool: 'pen',
+        toolProps: { ...useWhiteboardStore.getState().toolProps, color: '#3B82F6' },
+      });
+      const barHtml = renderToStaticMarkup(
+        React.createElement(PropertyBarContent, useWhiteboardStore.getState()),
+      );
+      expect(barHtml).toContain('aria-label="Color Palette"');
+      expect(barHtml).toContain('#3B82F6');
+    });
+
+    it('handles Enter to complete text editing and Shift+Enter to keep newline editing', () => {
+      let closedCommit: boolean | null = null;
+      const closeEditor = (commit: boolean) => {
+        closedCommit = commit;
+      };
+
+      const simulateEditorKeyDown = (e: {
+        key: string;
+        shiftKey?: boolean;
+        preventDefault: () => void;
+        stopPropagation: () => void;
+      }) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+          closeEditor(false);
+        } else if (e.key === 'Enter') {
+          if (!e.shiftKey) {
+            e.preventDefault();
+            closeEditor(true);
+          }
+        }
+      };
+
+      let prevented = false;
+      const preventDefault = () => {
+        prevented = true;
+      };
+      const stopPropagation = () => {};
+
+      // Plain Enter completes edit and calls closeEditor(true)
+      prevented = false;
+      closedCommit = null;
+      simulateEditorKeyDown({ key: 'Enter', shiftKey: false, preventDefault, stopPropagation });
+      expect(prevented).toBe(true);
+      expect(closedCommit).toBe(true);
+
+      // Shift+Enter does not close editor (inserts newline)
+      prevented = false;
+      closedCommit = null;
+      simulateEditorKeyDown({ key: 'Enter', shiftKey: true, preventDefault, stopPropagation });
+      expect(prevented).toBe(false);
+      expect(closedCommit).toBeNull();
+
+      // Escape dismisses editor without committing
+      prevented = false;
+      closedCommit = null;
+      simulateEditorKeyDown({ key: 'Escape', preventDefault, stopPropagation });
+      expect(closedCommit).toBe(false);
+    });
+
+    it('renders host controls for bulk role change and end session in RightPanel and TopBar', () => {
+      const sendPermissionChange = (_payload: unknown) => {};
+
+      const hostUser = { id: 'host-1', username: 'HostAdmin', color: '#EF4444', role: Role.HOST };
+      const testParticipants = [
+        { id: 'viewer-z', username: 'Zoe', color: '#10B981', role: Role.VIEWER, joinedAt: 1 },
+        { id: 'editor-b', username: 'Bob', color: '#3B82F6', role: Role.EDITOR, joinedAt: 2 },
+        { id: 'host-1', username: 'HostAdmin', color: '#EF4444', role: Role.HOST, joinedAt: 0 },
+        { id: 'editor-a', username: 'Alice', color: '#8B5CF6', role: Role.EDITOR, joinedAt: 3 },
+      ];
+
+      // 1. RightPanel rendered for Host
+      const hostPanelHtml = renderToStaticMarkup(
+        React.createElement(RightPanelContent, {
+          rightPanelOpen: true,
+          rightPanelTab: 'participants',
+          chatMessages: [],
+          unreadChatCount: 0,
+          participants: testParticipants,
+          currentUser: hostUser,
+          roomInfo: {
+            code: 'ROOM12',
+            name: 'Test Room',
+            isHost: true,
+            locked: false,
+            defaultViewer: false,
+          },
+          sendPermissionChange,
+          setProfileSettingsOpen: () => {},
+          setRightPanelOpen: () => {},
+          setRightPanelTab: () => {},
+          sendChatMessage: () => {},
+        }),
+      );
+
+      // Verify search input
+      expect(hostPanelHtml).toContain('Search participants by name...');
+      expect(hostPanelHtml).toContain('aria-label="Search participants"');
+
+      // Verify bulk role buttons
+      expect(hostPanelHtml).toContain('All to Editor');
+      expect(hostPanelHtml).toContain('All to Viewer');
+
+      // Verify End Session button for Host
+      expect(hostPanelHtml).toContain('End Session for Everyone');
+
+      // Verify ordering: Host first, then Editors (Alice, Bob), then Viewers (Zoe)
+      const hostIdx = hostPanelHtml.indexOf('HostAdmin');
+      const aliceIdx = hostPanelHtml.indexOf('Alice');
+      const bobIdx = hostPanelHtml.indexOf('Bob');
+      const zoeIdx = hostPanelHtml.indexOf('Zoe');
+      expect(hostIdx).toBeLessThan(aliceIdx);
+      expect(aliceIdx).toBeLessThan(bobIdx);
+      expect(bobIdx).toBeLessThan(zoeIdx);
+
+      // 2. RightPanel rendered for Viewer / Non-host
+      const viewerUser = { id: 'viewer-z', username: 'Zoe', color: '#10B981', role: Role.VIEWER };
+      const viewerPanelHtml = renderToStaticMarkup(
+        React.createElement(RightPanelContent, {
+          rightPanelOpen: true,
+          rightPanelTab: 'participants',
+          chatMessages: [],
+          unreadChatCount: 0,
+          participants: testParticipants,
+          currentUser: viewerUser,
+          roomInfo: {
+            code: 'ROOM12',
+            name: 'Test Room',
+            isHost: false,
+            locked: false,
+            defaultViewer: false,
+          },
+          sendPermissionChange,
+          setProfileSettingsOpen: () => {},
+          setRightPanelOpen: () => {},
+          setRightPanelTab: () => {},
+          sendChatMessage: () => {},
+        }),
+      );
+
+      // Non-host should NOT see bulk action buttons or end session button
+      expect(viewerPanelHtml).not.toContain('All to Editor');
+      expect(viewerPanelHtml).not.toContain('All to Viewer');
+      expect(viewerPanelHtml).not.toContain('End Session for Everyone');
+
+      // 3. TopBar rendered for Host vs Non-host
+      const topBarHostHtml = renderToStaticMarkup(
+        React.createElement(TopBarContent, {
+          roomInfo: {
+            code: 'ROOM12',
+            name: 'Test Room',
+            isHost: true,
+            locked: false,
+          },
+          currentUser: hostUser,
+        }),
+      );
+      expect(topBarHostHtml).toContain('End Session');
+      expect(topBarHostHtml).toContain('aria-label="End session"');
+
+      const topBarViewerHtml = renderToStaticMarkup(
+        React.createElement(TopBarContent, {
+          roomInfo: {
+            code: 'ROOM12',
+            name: 'Test Room',
+            isHost: false,
+            locked: false,
+          },
+          currentUser: viewerUser,
+        }),
+      );
+      expect(topBarViewerHtml).not.toContain('aria-label="End session"');
+    });
+
+    it('handles incoming PERMISSION_CHANGE for endSession and setAllRole in the store', () => {
+      // 1. setAllRole to VIEWER
+      useWhiteboardStore.setState({
+        activeTool: 'pen',
+        currentUser: { id: 'user-2', username: 'GuestUser', color: '#10B981', role: Role.EDITOR },
+        participants: [
+          { id: 'host-1', username: 'RoomHost', color: '#EF4444', role: Role.HOST, joinedAt: 0 },
+          { id: 'user-2', username: 'GuestUser', color: '#10B981', role: Role.EDITOR, joinedAt: 1 },
+          {
+            id: 'user-3',
+            username: 'GuestOther',
+            color: '#3B82F6',
+            role: Role.EDITOR,
+            joinedAt: 2,
+          },
+        ],
+        accessNotice: null,
+      });
+
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { setAllRole: Role.VIEWER },
+            { room: 'ROOM12', user_id: 'host-1' },
+          ),
+        );
+
+      const stateAfterViewer = useWhiteboardStore.getState();
+      expect(stateAfterViewer.participants.find((p) => p.id === 'user-2')?.role).toBe(Role.VIEWER);
+      expect(stateAfterViewer.participants.find((p) => p.id === 'user-3')?.role).toBe(Role.VIEWER);
+      expect(stateAfterViewer.participants.find((p) => p.id === 'host-1')?.role).toBe(Role.HOST);
+      expect(stateAfterViewer.currentUser?.role).toBe(Role.VIEWER);
+      expect(stateAfterViewer.activeTool).toBe('select');
+      expect(stateAfterViewer.accessNotice?.title).toBe('View-only access');
+
+      // 2. setAllRole to EDITOR
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { setAllRole: Role.EDITOR },
+            { room: 'ROOM12', user_id: 'host-1' },
+          ),
+        );
+
+      const stateAfterEditor = useWhiteboardStore.getState();
+      expect(stateAfterEditor.participants.find((p) => p.id === 'user-2')?.role).toBe(Role.EDITOR);
+      expect(stateAfterEditor.participants.find((p) => p.id === 'user-3')?.role).toBe(Role.EDITOR);
+      expect(stateAfterEditor.currentUser?.role).toBe(Role.EDITOR);
+
+      // 3. endSession
+      useWhiteboardStore
+        .getState()
+        .handleIncomingEnvelope(
+          createEnvelope(
+            MessageType.PERMISSION_CHANGE,
+            { endSession: true, reason: 'Session ended by class instructor' },
+            { room: 'ROOM12', user_id: 'host-1' },
+          ),
+        );
+
+      const stateAfterEnd = useWhiteboardStore.getState();
+      expect(stateAfterEnd.connectionStatus).toBe('disconnected');
+      expect(stateAfterEnd.roomInfo).toBeNull();
+      expect(stateAfterEnd.participants).toEqual([]);
+      expect(stateAfterEnd.accessNotice?.title).toBe('Session Ended');
+      expect(stateAfterEnd.accessNotice?.message).toBe('Session ended by class instructor');
     });
   });
 });

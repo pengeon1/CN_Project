@@ -3,7 +3,7 @@
  * Houses tool selectors: select, pen, eraser, shapes, text, sticky note, line/arrow, image.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ArrowUpRight,
   Circle,
@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { canMutateCanvas, isHost } from '@cn-whiteboard/common';
 import { type CanvasTool, useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { insertImageFile } from '../canvas/imageInsert.js';
 
 interface ToolItem {
@@ -65,17 +66,8 @@ export const LeftToolbar: React.FC = () => {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // Close more menu on click outside
-  useEffect(() => {
-    if (!moreMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMoreMenuOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', handleClickOutside);
-    return () => window.removeEventListener('mousedown', handleClickOutside);
-  }, [moreMenuOpen]);
+  // Close more menu on click outside or Escape (capture-phase handles canvas/toolbar stopPropagation)
+  useClickOutside(moreMenuOpen, menuRef, () => setMoreMenuOpen(false));
   const canEdit =
     !currentUser ||
     (canMutateCanvas(currentUser.role) && (!roomInfo?.locked || isHost(currentUser.role)));

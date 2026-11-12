@@ -20,6 +20,7 @@ import {
 } from '../src/store/useWhiteboardStore.js';
 import { PropertyBarContent } from '../src/components/layout/PropertyBar.js';
 import { isEditableElement, TOOL_SHORTCUTS } from '../src/hooks/useKeyboardShortcuts.js';
+import { shouldDismissOnOutsideEvent } from '../src/hooks/useClickOutside.js';
 import type { ElectronWhiteboardAPI } from '../src/types/ipc.js';
 
 describe('Client UI & Store Suite', () => {
@@ -1577,6 +1578,20 @@ describe('Client UI & Store Suite', () => {
       const beforeCommit = useWhiteboardStore.getState().textEditCommitCount;
       useWhiteboardStore.getState().requestCommitTextEdit();
       expect(useWhiteboardStore.getState().textEditCommitCount).toBe(beforeCommit + 1);
+    });
+
+    it('dismisses popovers only when pointer target is outside the container', () => {
+      const insideNode = { label: 'inside' };
+      const outsideNode = { label: 'outside' };
+      const container = {
+        contains: (node: unknown) => node === container || node === insideNode,
+      };
+
+      expect(shouldDismissOnOutsideEvent(null, outsideNode)).toBe(false);
+      expect(shouldDismissOnOutsideEvent(container, null)).toBe(false);
+      expect(shouldDismissOnOutsideEvent(container, container)).toBe(false);
+      expect(shouldDismissOnOutsideEvent(container, insideNode)).toBe(false);
+      expect(shouldDismissOnOutsideEvent(container, outsideNode)).toBe(true);
     });
   });
 });

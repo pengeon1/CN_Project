@@ -4,7 +4,7 @@
  * stroke width, fill toggle, and typography settings.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import type { ShapeObject } from '@cn-whiteboard/common';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import { useClickOutside } from '../../hooks/useClickOutside.js';
 import {
   colorChanges,
   defaultShapeAlign,
@@ -109,22 +110,14 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
   reorderObjects,
 }) => {
   const [fillMenuOpen, setFillMenuOpen] = useState(false);
+  const fillPickerRef = useRef<HTMLDivElement | null>(null);
 
   // Close the fill popover whenever tool, selection, or text edit target changes.
   useEffect(() => {
     setFillMenuOpen(false);
   }, [activeTool, selectedIds, activeTextEditor?.objectId]);
 
-  useEffect(() => {
-    if (!fillMenuOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!(e.target instanceof Element && e.target.closest('[data-fill-picker="true"]'))) {
-        setFillMenuOpen(false);
-      }
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [fillMenuOpen]);
+  useClickOutside(fillMenuOpen, fillPickerRef, () => setFillMenuOpen(false));
 
   const editingLiveText = activeTextEditor !== null;
   const selection = selectedIds.map((id) => objects[id]).filter((o) => o !== undefined);
@@ -407,7 +400,11 @@ export const PropertyBarContent: React.FC<PropertyBarProps> = ({
       {isShape && (
         <>
           <div className="h-4 w-[1px] bg-slate-800" />
-          <div className="relative flex items-center gap-1" data-fill-picker="true">
+          <div
+            ref={fillPickerRef}
+            className="relative flex items-center gap-1"
+            data-fill-picker="true"
+          >
             <button
               type="button"
               onClick={() => setFillMenuOpen((v) => !v)}

@@ -4,7 +4,7 @@
  * search button, chat toggle with unread counter, and prominent Share button.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -23,10 +23,13 @@ import {
   Save,
 } from 'lucide-react';
 import { useWhiteboardStore } from '../../store/useWhiteboardStore.js';
+import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { exportBoardPdf, exportBoardPng } from '../../export/boardExport.js';
 
 export const TopBar: React.FC = () => {
   const [exportOpen, setExportOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  useClickOutside(exportOpen, exportMenuRef, () => setExportOpen(false));
   const {
     roomInfo,
     persistenceStatus,
@@ -163,7 +166,7 @@ export const TopBar: React.FC = () => {
                 </button>
               </>
             )}
-            <div className="relative">
+            <div className="relative" ref={exportMenuRef}>
               <button
                 onClick={() => setExportOpen((o) => !o)}
                 title="Export the board"
